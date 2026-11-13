@@ -26,9 +26,9 @@ cd hermes-artcraft-plugin
 pip install -e ".[dev]"
 ```
 
-Enable the `artcraft` plugin in Hermes and make Pillow available in its Python environment.
+Enable the `artcraft` plugin in Hermes (`config.yaml` under `plugins.enabled: [artcraft]`) and make Pillow available in its Python environment.
 
-Set `ARTCRAFT_BIN_DIR` if your ArtCraft `*-cli` binaries live outside `PATH` and `~/.local/bin`.
+The plugin discovers ArtCraft binaries on `PATH`, in `ARTCRAFT_BIN_DIR`, in the active Hermes profile (`$HERMES_HOME/bin` or `~/.hermes/profiles/<profile>/bin`), and in standard ArtCraft locations (`~/.local/bin`, `~/bin`, `/usr/local/bin`). Set `ARTCRAFT_BIN_DIR` to explicitly override CLI paths.
 
 ## Tools Registered (`toolset: artcraft`)
 

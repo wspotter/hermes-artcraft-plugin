@@ -107,6 +107,10 @@ PHOTOCRAFT_SPOT_HEAL = {
             "region": {"type": "array", "items": {"type": "integer"},
                        "minItems": 4, "maxItems": 4,
                        "description": "[x, y, width, height] covering the allowed edit including brush edges."},
+            "timeout_s": {
+                "type": "number",
+                "description": "Optional execution timeout in seconds (default 120.0).",
+            },
         },
         "required": ["input_path", "output_path", "points", "size", "region"],
     },

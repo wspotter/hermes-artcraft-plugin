@@ -79,8 +79,14 @@ def lightcraft_run(args: Dict[str, Any], **kwargs: Any) -> str:
 def photocraft_spot_heal(args: Dict[str, Any], **kwargs: Any) -> str:
     """Run the verified spot-heal workflow."""
     try:
-        return json.dumps(spot_heal(*(args[key] for key in (
-            "input_path", "output_path", "points", "size", "region",
-        ))))
+        timeout_s = args.get("timeout_s", 120.0)
+        return json.dumps(
+            spot_heal(
+                *(args[key] for key in (
+                    "input_path", "output_path", "points", "size", "region",
+                )),
+                timeout_s=timeout_s,
+            )
+        )
     except (KeyError, OSError, TypeError, ValueError) as exc:
         return json.dumps({"ok": False, "error": str(exc)})

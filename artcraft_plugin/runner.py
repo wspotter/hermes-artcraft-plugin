@@ -93,7 +93,15 @@ def run_artcraft_cli(
     return result
 
 
-def spot_heal(input_path: str, output_path: str, points: list, size: int, region: list) -> dict:
+def spot_heal(
+    input_path: str,
+    output_path: str,
+    points: list,
+    size: int,
+    region: list,
+    *,
+    timeout_s: float = 120.0,
+) -> dict:
     """Heal a visible defect and publish a new PNG only after verification."""
     import json
     import os
@@ -104,7 +112,7 @@ def spot_heal(input_path: str, output_path: str, points: list, size: int, region
 
     source = Path(input_path).expanduser().resolve(strict=True)
     target = Path(output_path).expanduser().absolute()
-    if target.suffix.lower() != ".png" or os.path.lexists(target):
+    if target.suffix.lower() != ".png" or os.path.lexists(target) or not target.parent.is_dir():
         raise ValueError("output_path must name a new PNG in an existing directory")
     info = inspect_image(str(source))
     if not info.get("valid"):
@@ -137,6 +145,7 @@ def spot_heal(input_path: str, output_path: str, points: list, size: int, region
              json.dumps({"points": points, "size": size}), "--out", str(output)],
             input_path=str(source), output_path=str(output),
             expected_width=info["width"], expected_height=info["height"], region=region,
+            timeout_s=timeout_s,
         )
         if not result["ok"]:
             return {"ok": False, "error": result["error"], "stderr": result.get("stderr", "")[-1000:]}
@@ -149,7 +158,12 @@ def spot_heal(input_path: str, output_path: str, points: list, size: int, region
             raise ValueError("source changed during the edit")
         if verification["output"]["format"] != "PNG":
             raise ValueError("PhotoCraft did not produce a PNG")
-        os.link(output, target)
+        try:
+            os.link(output, target)
+        except OSError:
+            if os.path.lexists(target):
+                raise ValueError("output_path must name a new PNG in an existing directory")
+            shutil.copy2(output, target)
         return {
             "ok": True, "output_path": str(target), "source_sha256": info["sha256"],
             "output_sha256": verification["output"]["sha256"],

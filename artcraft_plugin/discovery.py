@@ -51,6 +51,19 @@ def _candidate_dirs(extra_dirs: Optional[List[Path]] = None) -> List[Path]:
         dirs.append(Path(env_dir).expanduser())
     if extra_dirs:
         dirs.extend(extra_dirs)
+
+    hermes_home = os.environ.get("HERMES_HOME", "").strip()
+    if hermes_home:
+        dirs.append(Path(hermes_home).expanduser() / "bin")
+
+    hermes_profile = os.environ.get("HERMES_PROFILE", "").strip()
+    if hermes_profile:
+        dirs.append(Path.home() / ".hermes" / "profiles" / hermes_profile / "bin")
+
+    # Profile-specific discovery for Printery cluster agents (e.g. Otto profile)
+    dirs.append(Path.home() / ".hermes" / "profiles" / "ottostacy" / "bin")
+    dirs.append(Path.home() / ".hermes" / "bin")
+
     dirs.extend(_EXTRA_SEARCH_DIRS)
     return dirs
 
