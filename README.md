@@ -35,7 +35,8 @@ The plugin discovers ArtCraft binaries on `PATH`, in `ARTCRAFT_BIN_DIR`, in the 
 | Tool | Purpose |
 |---|---|
 | `artcraft_status` | Discover installed ArtCraft CLIs and report paths + versions |
-| `artcraft_inspect` | Inspect image format, color mode, dimensions, DPI, and SHA-256 |
+| `artcraft_inspect` | Quick check: format, color mode, dimensions, DPI, orientation, and SHA-256 |
+| `artcraft_prepare_inspection` | Generate whole-photo preview, 1:1 native crops, print PPI, and measured clues |
 | `artcraft_verify_edit` | Verify output validity, dimensions, and pixel diff (full image or `[x, y, w, h]` region) |
 | `photocraft_spot_heal` | Apply a localized stroke and publish a verified PNG |
 | `photocraft_run` | Show PhotoCraft CLI help or version |
@@ -45,12 +46,14 @@ The plugin discovers ArtCraft binaries on `PATH`, in `ARTCRAFT_BIN_DIR`, in the 
 
 ```bash
 hermes artcraft doctor
+hermes artcraft inspect <path> [--working-dir DIR] [--preview-max DIM] [--crop-size SIZE]
 hermes artcraft verify <input_path> <output_path> [--width W] [--height H] [--region X Y W H]
 ```
 
 Or standalone without Hermes:
 ```bash
 python -m artcraft_plugin.cli doctor
+python -m artcraft_plugin.cli inspect input.png --preview-max 1024 --crop-size 256
 python -m artcraft_plugin.cli verify input.png output.png --region 100 100 64 64
 ```
 
@@ -58,6 +61,7 @@ python -m artcraft_plugin.cli verify input.png output.png --region 100 100 64 64
 
 Generic, on-demand `SKILL.md` recipes live in [`skills/`](skills/):
 - `artcraft-router` — choose the right app/tool and enforce inspect → edit → verify
+- `photo-inspection` — whole-photo preview and 1:1 native crops visual inspection recipe
 - `photocraft-cli-edits` — non-destructive PhotoCraft CLI workflow with region verification
 - `lightcraft-cli-edits` — non-destructive LightCraft CLI development & export workflow
 

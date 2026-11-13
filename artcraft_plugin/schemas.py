@@ -31,6 +31,56 @@ ARTCRAFT_INSPECT = {
     },
 }
 
+ARTCRAFT_PREPARE_INSPECTION = {
+    "name": "artcraft_prepare_inspection",
+    "description": (
+        "Prepare an image for agent visual inspection: generates a whole-photo preview "
+        "and 1:1 native-resolution crops into a working directory without altering the "
+        "source file. Computes orientation, color profile, effective print resolution (PPI), "
+        "and measured clues (endpoint clipping, sharpness, noise) with explicit measurement limits."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "path": {
+                "type": "string",
+                "description": "Path to the image file to inspect.",
+            },
+            "working_dir": {
+                "type": "string",
+                "description": "Directory to write preview and crops into. Created if missing. Defaults to a temp directory.",
+            },
+            "max_preview_dimension": {
+                "type": "integer",
+                "description": "Maximum width/height of the generated preview image (default 1024).",
+                "minimum": 64,
+                "maximum": 4096,
+            },
+            "crop_size": {
+                "type": "integer",
+                "description": "Pixel width/height of default native crops (default 256).",
+                "minimum": 16,
+                "maximum": 2048,
+            },
+            "regions": {
+                "type": "array",
+                "items": {
+                    "type": "array",
+                    "items": {"type": "integer"},
+                    "minItems": 4,
+                    "maxItems": 4,
+                },
+                "description": "Optional list of custom crop regions [x, y, width, height] in source pixels.",
+            },
+            "target_print_sizes": {
+                "type": "array",
+                "description": "Optional custom target print sizes to compute effective PPI for (e.g. [[8, 10], [11, 14]]).",
+            },
+        },
+        "required": ["path"],
+    },
+}
+
 ARTCRAFT_VERIFY_EDIT = {
     "name": "artcraft_verify_edit",
     "description": (

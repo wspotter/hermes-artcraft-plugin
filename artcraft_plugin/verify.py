@@ -30,6 +30,12 @@ def inspect_image(path_str: str) -> Dict[str, Any]:
         with Image.open(path) as img:
             img.load()
             dpi = img.info.get("dpi")
+            orientation = (
+                "landscape"
+                if img.width > img.height
+                else ("portrait" if img.height > img.width else "square")
+            )
+            has_icc = img.info.get("icc_profile") is not None
             return {
                 "exists": True,
                 "valid": True,
@@ -40,6 +46,8 @@ def inspect_image(path_str: str) -> Dict[str, Any]:
                 "mode": img.mode,
                 "width": img.width,
                 "height": img.height,
+                "orientation": orientation,
+                "has_icc_profile": has_icc,
                 "dpi": list(dpi) if isinstance(dpi, tuple) else dpi,
             }
     except Exception as exc:

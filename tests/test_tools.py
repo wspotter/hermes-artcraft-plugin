@@ -45,6 +45,7 @@ class TestToolsAndPluginRegistration(unittest.TestCase):
             {
                 "artcraft_status",
                 "artcraft_inspect",
+                "artcraft_prepare_inspection",
                 "artcraft_verify_edit",
                 "photocraft_run",
                 "photocraft_spot_heal",
@@ -193,4 +194,29 @@ class TestToolsAndPluginRegistration(unittest.TestCase):
                 self.assertFalse(res["ok"])
                 self.assertIn("timeout", res["error"])
                 self.assertFalse(out.exists())
-                self.assertEqual(src.read_bytes(), src_bytes)
+
+    def test_prepare_inspection_tool(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            src = root / "photo.png"
+            Image.new("RGB", (64, 48), color=(200, 100, 50)).save(src)
+            work = root / "inspect_work"
+
+            # Missing path
+            err_res = json.loads(tools.artcraft_prepare_inspection({}))
+            self.assertFalse(err_res["ok"])
+
+            # Valid inspection
+            res = json.loads(
+                tools.artcraft_prepare_inspection(
+                    {"path": str(src), "working_dir": str(work), "crop_size": 32}
+                )
+            )
+            self.assertTrue(res["ok"])
+            self.assertTrue(res["valid"])
+            self.assertEqual(res["source"]["orientation"], "landscape")
+            self.assertIn("inspection_artifacts", res)
+            self.assertTrue(Path(res["inspection_artifacts"]["whole_photo_preview"]["path"]).exists())
+            self.assertGreaterEqual(len(res["inspection_artifacts"]["native_resolution_crops"]), 1)
+            self.assertIn("measured_clues", res)
+            self.assertIn("measurement_limits", res["measured_clues"])

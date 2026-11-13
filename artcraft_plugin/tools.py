@@ -6,6 +6,7 @@ import json
 from typing import Any, Dict
 
 from .discovery import discover_all
+from .inspect import prepare_inspection
 from .runner import run_artcraft_cli, spot_heal
 from .verify import inspect_image, verify_edit
 
@@ -32,6 +33,30 @@ def artcraft_inspect(args: Dict[str, Any], **kwargs: Any) -> str:
     try:
         info = inspect_image(path)
         return json.dumps({"ok": bool(info.get("valid")), **info})
+    except Exception as exc:
+        return json.dumps({"ok": False, "error": str(exc)})
+
+
+def artcraft_prepare_inspection(args: Dict[str, Any], **kwargs: Any) -> str:
+    """Prepare whole-photo preview, native crops, print PPI, and measured clues."""
+    path = args.get("path")
+    if not isinstance(path, str) or not path.strip():
+        return json.dumps({"ok": False, "error": "Missing required 'path' string"})
+    try:
+        working_dir = args.get("working_dir")
+        max_preview_dimension = args.get("max_preview_dimension", 1024)
+        crop_size = args.get("crop_size", 256)
+        regions = args.get("regions")
+        target_print_sizes = args.get("target_print_sizes")
+        result = prepare_inspection(
+            path,
+            working_dir=working_dir,
+            max_preview_dimension=max_preview_dimension,
+            crop_size=crop_size,
+            regions=regions,
+            target_print_sizes=target_print_sizes,
+        )
+        return json.dumps({"ok": bool(result.get("valid")), **result})
     except Exception as exc:
         return json.dumps({"ok": False, "error": str(exc)})
 

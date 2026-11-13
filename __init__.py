@@ -22,6 +22,12 @@ def register(ctx: Any) -> None:
         handler=tools.artcraft_inspect,
     )
     ctx.register_tool(
+        name="artcraft_prepare_inspection",
+        toolset="artcraft",
+        schema=schemas.ARTCRAFT_PREPARE_INSPECTION,
+        handler=tools.artcraft_prepare_inspection,
+    )
+    ctx.register_tool(
         name="artcraft_verify_edit",
         toolset="artcraft",
         schema=schemas.ARTCRAFT_VERIFY_EDIT,
