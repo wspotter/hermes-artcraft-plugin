@@ -372,6 +372,128 @@ class TestJobWorkspaceCheckpointsAndDelivery(unittest.TestCase):
         code = cli.main(["job", "status", "cli_job_1", "--workspace", str(self.workspace)])
         self.assertEqual(code, 0)
 
+    def test_delivery_protects_original_and_symlinks_and_hardlinks(self) -> None:
+        """Delivery refuses destinations resolving to original, job source, checkpoint, or existing files."""
+        import os
+
+        orig_p = Path(self.temp_dir.name) / "original_customer_photo.png"
+        Image.new("RGB", (80, 80), color=(200, 100, 50)).save(orig_p)
+        from artcraft_plugin.verify import sha256_file
+        orig_hash = sha256_file(orig_p)
+
+        export_p = Path(self.temp_dir.name) / "edited_export.png"
+        Image.new("RGB", (80, 80), color=(10, 20, 30)).save(export_p)
+
+        jobs.init_job("job_protect", source_path=str(orig_p), workspace_dir=self.workspace)
+        cp = jobs.save_checkpoint("job_protect", "heal", str(export_p), verified=True, workspace_dir=self.workspace)
+        cp_path = Path(cp["checkpoint"]["path"])
+
+        # Invalid export bytes must be rejected even if verified=True
+        bad_export = Path(self.temp_dir.name) / "corrupt.png"
+        bad_export.write_bytes(b"not-a-valid-image")
+        bad_res = jobs.record_export_artifact("job_protect", "bad_art", str(bad_export), verified=True, workspace_dir=self.workspace)
+        self.assertFalse(bad_res["ok"])
+
+        reg = jobs.record_export_artifact("job_protect", "good_art", str(export_p), verified=True, workspace_dir=self.workspace)
+        self.assertTrue(reg["ok"])
+
+        # 1. Direct overwrite of original
+        r1 = jobs.record_delivery("job_protect", str(orig_p), "good_art", status="delivered", workspace_dir=self.workspace)
+        self.assertFalse(r1["ok"])
+        self.assertEqual(sha256_file(orig_p), orig_hash)
+
+        # 2. Symlink to original
+        sym_p = Path(self.temp_dir.name) / "sym_to_orig.png"
+        sym_p.symlink_to(orig_p)
+        r2 = jobs.record_delivery("job_protect", str(sym_p), "good_art", status="delivered", workspace_dir=self.workspace)
+        self.assertFalse(r2["ok"])
+        self.assertEqual(sha256_file(orig_p), orig_hash)
+
+        # 3. Hard link to original
+        hard_p = Path(self.temp_dir.name) / "hard_to_orig.png"
+        os.link(orig_p, hard_p)
+        r3 = jobs.record_delivery("job_protect", str(hard_p), "good_art", status="delivered", workspace_dir=self.workspace)
+        self.assertFalse(r3["ok"])
+        self.assertEqual(sha256_file(orig_p), orig_hash)
+
+        # 4. Protected checkpoint
+        r4 = jobs.record_delivery("job_protect", str(cp_path), "good_art", status="delivered", workspace_dir=self.workspace)
+        self.assertFalse(r4["ok"])
+
+        # 5. Existing different destination without explicit overwrite
+        other_existing = Path(self.temp_dir.name) / "existing_other.png"
+        Image.new("RGB", (80, 80), color=(99, 99, 99)).save(other_existing)
+        other_hash = sha256_file(other_existing)
+        r5 = jobs.record_delivery("job_protect", str(other_existing), "good_art", status="delivered", workspace_dir=self.workspace)
+        self.assertFalse(r5["ok"])
+        self.assertEqual(sha256_file(other_existing), other_hash)
+
+        # 6. Changed-after-registration artifact is rejected
+        registered_path = Path(reg["artifact"]["path"])
+        registered_path.write_bytes(b"tampered")
+        new_dest = Path(self.temp_dir.name) / "fresh_dest.png"
+        r6 = jobs.record_delivery("job_protect", str(new_dest), "good_art", status="delivered", workspace_dir=self.workspace)
+        self.assertFalse(r6["ok"])
+        self.assertFalse(new_dest.exists())
+
+    def test_remote_uncertain_delivery_stays_uncertain_without_provenance(self) -> None:
+        """Remote uncertain delivery cannot be cleared to failed just because no local file exists."""
+        src_p = Path(self.temp_dir.name) / "remote_src.png"
+        Image.new("RGB", (80, 80), color=(40, 80, 120)).save(src_p)
+        jobs.init_job("job_remote", source_path=str(src_p), workspace_dir=self.workspace)
+        jobs.record_export_artifact("job_remote", "art_rem", str(src_p), verified=True, workspace_dir=self.workspace)
+
+        remote_dest = "signal://+15025550100"
+        unc = jobs.record_delivery("job_remote", remote_dest, "art_rem", status="uncertain", workspace_dir=self.workspace)
+        self.assertTrue(unc["ok"])
+
+        # Reconcile without remote evidence/provenance must stay uncertain
+        recon = jobs.reconcile_delivery("job_remote", remote_dest, workspace_dir=self.workspace)
+        self.assertFalse(recon["ok"])
+        self.assertEqual(recon["reconciled_status"], "uncertain")
+
+        # Retry must remain blocked
+        retry = jobs.record_delivery("job_remote", remote_dest, "art_rem", status="delivered", workspace_dir=self.workspace)
+        self.assertFalse(retry["ok"])
+        self.assertTrue(retry["requires_reconciliation"])
+
+        # Caller-supplied confirmation without provenance is also rejected for remote
+        bad_conf = jobs.reconcile_delivery("job_remote", remote_dest, confirmed_status="failed", workspace_dir=self.workspace)
+        self.assertFalse(bad_conf["ok"])
+
+        # With explicit remote provenance, reconciliation succeeds
+        ok_conf = jobs.reconcile_delivery(
+            "job_remote",
+            remote_dest,
+            confirmed_status="failed",
+            provenance={"connector": "signal", "rpc_id": "tx-123", "verified_by": "signal-cli"},
+            workspace_dir=self.workspace,
+        )
+        self.assertTrue(ok_conf["ok"])
+        self.assertEqual(ok_conf["reconciled_status"], "failed")
+
+    def test_concurrent_delivery_produces_single_authorized_send(self) -> None:
+        """Concurrent double submission serializes via locking and prevents duplicate send."""
+        import concurrent.futures
+
+        src_p = Path(self.temp_dir.name) / "conc_src.png"
+        Image.new("RGB", (60, 60), color=(70, 70, 70)).save(src_p)
+        jobs.init_job("job_conc", source_path=str(src_p), workspace_dir=self.workspace)
+        jobs.record_export_artifact("job_conc", "art_conc", str(src_p), verified=True, workspace_dir=self.workspace)
+
+        dest = Path(self.temp_dir.name) / "conc_dest.png"
+
+        def _deliver():
+            return jobs.record_delivery("job_conc", str(dest), "art_conc", status="delivered", workspace_dir=self.workspace)
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
+            results = [f.result() for f in [pool.submit(_deliver) for _ in range(4)]]
+
+        new_sends = [r for r in results if r.get("ok") and not r.get("duplicate_prevented")]
+        dups = [r for r in results if r.get("duplicate_prevented")]
+        self.assertEqual(len(new_sends), 1)
+        self.assertEqual(len(dups), 3)
+
 
 if __name__ == "__main__":
     unittest.main()
