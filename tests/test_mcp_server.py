@@ -157,3 +157,88 @@ class TestArtCraftMcpServer(unittest.TestCase):
         self.assertIsNotNone(msg)
         self.assertEqual(msg["id"], "cl-1")
         self.assertEqual(msg["method"], "ping")
+
+    def test_tools_call_missing_input_sets_is_error_true(self) -> None:
+        req = {
+            "jsonrpc": "2.0",
+            "id": "err-missing",
+            "method": "tools/call",
+            "params": {
+                "name": "artcraft_inspect",
+                "arguments": {"path": str(self.test_dir / "does_not_exist.png")},
+            },
+        }
+        resp = mcp_server.process_message(req)
+        self.assertIsNotNone(resp)
+        self.assertTrue(resp["result"]["isError"])
+        payload = json.loads(resp["result"]["content"][0]["text"])
+        self.assertFalse(payload["ok"])
+
+    def test_tools_call_failed_cli_sets_is_error_true(self) -> None:
+        req = {
+            "jsonrpc": "2.0",
+            "id": "err-cli",
+            "method": "tools/call",
+            "params": {
+                "name": "photocraft_spot_heal",
+                "arguments": {
+                    "input_path": str(self.test_dir / "missing.png"),
+                    "output_path": str(self.test_dir / "out.png"),
+                    "region": [0, 0, 10, 10],
+                    "points": [[5, 5]],
+                },
+            },
+        }
+        resp = mcp_server.process_message(req)
+        self.assertIsNotNone(resp)
+        self.assertTrue(resp["result"]["isError"])
+        payload = json.loads(resp["result"]["content"][0]["text"])
+        self.assertFalse(payload["ok"])
+
+    def test_tools_call_clarification_and_quality_rejection_not_is_error(self) -> None:
+        # 1. Clarification gate (3:4 source for 8x10 borderless) -> isError=False
+        src = self.test_dir / "portrait_3x4.png"
+        out = self.test_dir / "print_8x10.png"
+        Image.new("RGB", (300, 400), color=(120, 120, 120)).save(src)
+        req_clarify = {
+            "jsonrpc": "2.0",
+            "id": "clarify-1",
+            "method": "tools/call",
+            "params": {
+                "name": "artcraft_prepare_print",
+                "arguments": {
+                    "input_path": str(src),
+                    "output_path": str(out),
+                    "width_in": 8.0,
+                    "height_in": 10.0,
+                    "fit_mode": "borderless",
+                },
+            },
+        }
+        resp_c = mcp_server.process_message(req_clarify)
+        self.assertFalse(resp_c["result"]["isError"])
+        self.assertEqual(json.loads(resp_c["result"]["content"][0]["text"])["status"], "needs_clarification")
+
+        # 2. Quality assessment rejecting a no-op output -> isError=False
+        same_out = self.test_dir / "same_out.png"
+        Image.new("RGB", (300, 400), color=(120, 120, 120)).save(same_out)
+        req_review = {
+            "jsonrpc": "2.0",
+            "id": "review-noop",
+            "method": "tools/call",
+            "params": {
+                "name": "artcraft_build_review",
+                "arguments": {
+                    "source_path": str(src),
+                    "output_path": str(same_out),
+                    "work_dir": str(self.test_dir / "rev"),
+                    "region": [10, 10, 40, 40],
+                },
+            },
+        }
+        resp_r = mcp_server.process_message(req_review)
+        self.assertFalse(resp_r["result"]["isError"])
+        rev_payload = json.loads(resp_r["result"]["content"][0]["text"])
+        self.assertFalse(rev_payload["passed"])
+        flag_ids = [f["id"] for f in rev_payload["flags"]]
+        self.assertIn("untouched_scratch", flag_ids)

@@ -100,6 +100,39 @@ def send_message(message: Dict[str, Any], stream: BinaryIO = sys.stdout.buffer) 
     stream.flush()
 
 
+def _result_is_error(tool_name: str, result_str: str) -> bool:
+    """Return True when a JSON tool payload represents an execution/validation failure.
+
+    Preserves isError=False for interactive clarification/decision gates and
+    for successful quality-assessment tools (`artcraft_build_review`,
+    `artcraft_verify_edit`) when they cleanly reject an image's quality without
+    an execution error.
+    """
+    try:
+        data = json.loads(result_str)
+    except Exception:
+        return False
+
+    if not isinstance(data, dict):
+        return False
+
+    if data.get("status") in ("needs_clarification", "needs_decision"):
+        return False
+
+    if data.get("ok") is False:
+        return True
+
+    if data.get("error"):
+        return True
+
+    if tool_name == "artcraft_verify_edit" and data.get("passed") is False:
+        reason = str(data.get("reason") or "")
+        if reason.startswith(("invalid_input", "invalid_output")):
+            return True
+
+    return False
+
+
 def process_message(message: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """Process a single JSON-RPC 2.0 request or notification."""
     if not isinstance(message, dict) or message.get("jsonrpc") != "2.0":
@@ -128,7 +161,7 @@ def process_message(message: Dict[str, Any]) -> Optional[Dict[str, Any]]:
                 },
                 "instructions": (
                     "ArtCraft photo inspection, print prep, verified spot-healing, "
-                    "step checkpoints, review packages, and job workspaces for Ollie and Otto."
+                    "step checkpoints, review packages, and job workspaces."
                 ),
             },
         }
@@ -176,6 +209,7 @@ def process_message(message: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         handler: Callable[..., str] = EXPOSED_TOOLS[tool_name]["handler"]
         try:
             result_str = handler(arguments)
+            is_error = _result_is_error(tool_name, result_str)
             return {
                 "jsonrpc": "2.0",
                 "id": request_id,
@@ -183,7 +217,7 @@ def process_message(message: Dict[str, Any]) -> Optional[Dict[str, Any]]:
                     "content": [
                         {"type": "text", "text": result_str}
                     ],
-                    "isError": False,
+                    "isError": is_error,
                 },
             }
         except Exception as exc:
