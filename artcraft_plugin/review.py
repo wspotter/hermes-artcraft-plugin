@@ -26,6 +26,7 @@ try:
 except ImportError:
     np = None
 
+from .crop_overlay import render_crop_overlay, validate_crop
 from .inspect import determine_aspect_ratio, determine_orientation
 from .verify import _count_changed_pixels, _validate_region, inspect_image, sha256_file
 
@@ -180,6 +181,7 @@ def build_review_package(
     crop_size: int = 256,
     expected_aspect: Optional[Union[float, str]] = None,
     preserve_framing: bool = True,
+    crop_geometry: Optional[Dict[str, Any]] = None,
     retry_count: int = 0,
     max_retries: int = 3,
     last_checkpoint_path: Optional[Union[str, Path]] = None,
@@ -243,6 +245,11 @@ def build_review_package(
     src_w, src_h = src_info["width"], src_info["height"]
     out_w, out_h = out_info["width"], out_info["height"]
 
+    try:
+        crop_review = validate_crop(crop_geometry, src_w, src_h)
+    except ValueError as exc:
+        return {"ok": False, "passed": False, "error": str(exc)}
+
     src_aspect_info = determine_aspect_ratio(src_w, src_h)
     out_aspect_info = determine_aspect_ratio(out_w, out_h)
     src_ratio = round(src_w / src_h, 4) if src_h else 0.0
@@ -258,6 +265,12 @@ def build_review_package(
         out_preview_file = work_dir / "preview_output.png"
         src_prev_dim = generate_preview(s_img, src_preview_file, max_preview_dimension)
         out_prev_dim = generate_preview(o_img, out_preview_file, max_preview_dimension)
+
+        if crop_geometry is not None:
+            overlay_dir = Path(tempfile.mkdtemp(prefix="crop-overlay-", dir=work_dir))
+            overlay_path = overlay_dir / "comparison.png"
+            render_crop_overlay(src_preview_file, out_preview_file, (src_w, src_h), crop_review["retained_source_pixels"], overlay_path)
+            crop_review["comparison_path"] = str(overlay_path)
 
         # Total changed pixels calculation
         same_dims = (src_w == out_w and src_h == out_h)
@@ -542,6 +555,7 @@ def build_review_package(
             "mode": out_info.get("mode"),
             "has_icc_profile": out_info.get("has_icc_profile"),
         },
+        "crop_review": crop_review,
         "previews": {
             "source_preview_path": str(src_preview_file),
             "output_preview_path": str(out_preview_file),

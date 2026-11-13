@@ -93,3 +93,19 @@ python3 -m unittest discover -s tests -v
 ## License
 
 MIT
+
+For an intentional crop, pass the editor's retained boundary to review. The
+comparison shades the removed area on the source and shows the output beside it.
+
+```sh
+hermes artcraft review source.jpg cropped.jpg --no-preserve-framing \
+  --crop-geometry '{"rect":[55,106,1745,2409]}'
+```
+
+The agent tool accepts the same object as `crop_geometry`. Coordinates are in
+source image pixels with origin at the upper left. Use `quad` with four
+perimeter-ordered points for a perspective crop. On a straightened image, a
+rectangle can include `artwork_rect` and a calibrated `pixels_per_inch` to
+report paint trim per edge. Without calibration, the trim is unmeasured.
+The outline uses the supplied geometry. Review the comparison to assess
+composition and signature retention.

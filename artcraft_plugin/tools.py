@@ -243,6 +243,7 @@ def artcraft_build_review(args: Dict[str, Any], **kwargs: Any) -> str:
             crop_size=int(args.get("crop_size", 256)),
             expected_aspect=args.get("expected_aspect"),
             preserve_framing=bool(args.get("preserve_framing", True)),
+            crop_geometry=args.get("crop_geometry"),
             retry_count=int(args.get("retry_count", 0)),
             max_retries=int(args.get("max_retries", 3)),
             last_checkpoint_path=args.get("last_checkpoint_path"),

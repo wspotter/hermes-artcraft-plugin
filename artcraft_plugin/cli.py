@@ -150,6 +150,7 @@ def _cmd_review(args: argparse.Namespace) -> int:
             crop_size=args.crop_size,
             expected_aspect=args.expected_aspect,
             preserve_framing=args.preserve_framing,
+            crop_geometry=args.crop_geometry,
             retry_count=args.retry_count,
             max_retries=args.max_retries,
             last_checkpoint_path=args.last_checkpoint,
@@ -311,6 +312,7 @@ def register_cli(subparser: argparse.ArgumentParser) -> None:
     rev_cmd.add_argument("--regions", default=None, help="JSON-encoded list of repair regions [[x,y,w,h], ...]")
     rev_cmd.add_argument("--preview-max", type=int, default=1024, help="Max preview dimension in pixels (default 1024)")
     rev_cmd.add_argument("--crop-size", type=int, default=256, help="Native crop dimension in pixels (default 256)")
+    rev_cmd.add_argument("--crop-geometry", type=json.loads, help="JSON crop rect or quad in source pixels")
     rev_cmd.add_argument("--expected-aspect", default=None, help="Optional expected aspect ratio (e.g. '4:5' or 0.8)")
     rev_cmd.add_argument("--no-preserve-framing", action="store_false", dest="preserve_framing", default=True, help="Allow aspect/framing shift from source")
     rev_cmd.add_argument("--retry-count", type=int, default=0, help="Current retry count")

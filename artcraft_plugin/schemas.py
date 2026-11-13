@@ -395,6 +395,7 @@ ARTCRAFT_BUILD_REVIEW = {
             "max_preview_dimension": {"type": "integer", "default": 1024, "description": "Max preview size in px."},
             "crop_size": {"type": "integer", "default": 256, "description": "Native crop dimension in px."},
             "expected_aspect": {"type": "string", "description": "Optional expected aspect ratio (e.g. '4:5' or 0.8)."},
+            "crop_geometry": {"type": "object", "description": "Editor-supplied source pixel geometry: rect [left,top,right,bottom] or quad of four ordered [x,y] points. For a rect on a straightened source, optional artwork_rect and pixels_per_inch measure paint trim."},
             "preserve_framing": {"type": "boolean", "default": True, "description": "Whether framing/aspect must match source unless authorized."},
             "retry_count": {"type": "integer", "default": 0, "description": "Current retry attempt index."},
             "max_retries": {"type": "integer", "default": 3, "description": "Maximum allowed retry attempts."},
