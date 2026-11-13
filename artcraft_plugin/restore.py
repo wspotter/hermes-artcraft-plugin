@@ -298,7 +298,11 @@ def generate_before_after_crops(
         norm_h = max(before_crop.height, after_crop.height, 120)
         nb_w = int(round(before_crop.width * (norm_h / before_crop.height)))
         na_w = int(round(after_crop.width * (norm_h / after_crop.height)))
-        nb_disp = before_crop.resize((nb_w, norm_h), Image.Resampling.NEAREST if scale_factor == 1.0 else Image.Resampling.BILINEAR)
+        nb_disp = (
+            before_crop
+            if (nb_w, norm_h) == before_crop.size
+            else before_crop.resize((nb_w, norm_h), Image.Resampling.BILINEAR)
+        )
         na_disp = after_crop.resize((na_w, norm_h), Image.Resampling.BILINEAR)
 
         native_strip_w = nb_disp.width + na_disp.width + 12
