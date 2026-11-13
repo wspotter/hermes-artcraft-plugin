@@ -70,6 +70,18 @@ def register(ctx: Any) -> None:
         schema=schemas.ARTCRAFT_CHECKPOINT,
         handler=tools.artcraft_checkpoint,
     )
+    ctx.register_tool(
+        name="artcraft_build_review",
+        toolset="artcraft",
+        schema=schemas.ARTCRAFT_BUILD_REVIEW,
+        handler=tools.artcraft_build_review,
+    )
+    ctx.register_tool(
+        name="artcraft_job",
+        toolset="artcraft",
+        schema=schemas.ARTCRAFT_JOB,
+        handler=tools.artcraft_job,
+    )
 
     if hasattr(ctx, "register_cli_command"):
         ctx.register_cli_command(

@@ -53,8 +53,11 @@ class TestToolsAndPluginRegistration(unittest.TestCase):
                 "lightcraft_run",
                 "artcraft_restore_step",
                 "artcraft_checkpoint",
+                "artcraft_build_review",
+                "artcraft_job",
             },
         )
+        self.assertEqual(len(ctx.tools), 12)
         for tool in ctx.tools.values():
             self.assertEqual(tool["toolset"], "artcraft")
         self.assertIn("artcraft", ctx.cli_commands)
