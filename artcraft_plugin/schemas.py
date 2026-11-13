@@ -165,3 +165,89 @@ PHOTOCRAFT_SPOT_HEAL = {
         "required": ["input_path", "output_path", "points", "size", "region"],
     },
 }
+
+ARTCRAFT_PREPARE_PRINT = {
+    "name": "artcraft_prepare_print",
+    "description": (
+        "Prepare an agreed print request into a correctly sized, verified delivery file. "
+        "Calculates required pixels from physical dimensions (width_in, height_in) and PPI, "
+        "compares aspect ratios, enforces a clarification gate when instructions conflict "
+        "between borderless crop and margins, strictly preserves proportions, reports effective "
+        "source resolution separately from export resolution, preserves ICC color profiles, "
+        "reopens and decodes the delivery file to verify dimensions, PPI, format, and profile, "
+        "and produces a visual composition preview."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "input_path": {
+                "type": "string",
+                "description": "Path to the source photo.",
+            },
+            "output_path": {
+                "type": "string",
+                "description": "Path for the prepared print delivery file.",
+            },
+            "width_in": {
+                "type": "number",
+                "description": "Print target width in inches (e.g. 8.0).",
+            },
+            "height_in": {
+                "type": "number",
+                "description": "Print target height in inches (e.g. 10.0).",
+            },
+            "orientation": {
+                "type": "string",
+                "enum": ["auto", "portrait", "landscape"],
+                "default": "auto",
+                "description": "Target print orientation (default 'auto').",
+            },
+            "fit_mode": {
+                "type": "string",
+                "enum": ["auto", "borderless", "crop", "margins", "fit"],
+                "default": "auto",
+                "description": "Fit mode: 'borderless'/'crop' to fill sheet; 'margins'/'fit' to preserve entire photo with margins.",
+            },
+            "confirm_crop": {
+                "type": "boolean",
+                "default": False,
+                "description": "Confirm cropping when aspect ratio conflicts with sheet in borderless mode.",
+            },
+            "ppi": {
+                "type": "integer",
+                "default": 300,
+                "description": "Target export resolution in pixels per inch (default 300).",
+            },
+            "output_format": {
+                "type": "string",
+                "enum": ["auto", "PNG", "TIFF", "JPEG"],
+                "default": "auto",
+                "description": "Output image format (default auto, inferred from output_path).",
+            },
+            "margin_color": {
+                "type": "string",
+                "default": "white",
+                "description": "Color for margins when fit_mode is margins (default 'white').",
+            },
+            "preserve_master_path": {
+                "type": "string",
+                "description": "Optional destination path to preserve an untouched master copy.",
+            },
+            "allow_upscale": {
+                "type": "boolean",
+                "default": False,
+                "description": "Allow upscaling if source image resolution is smaller than target print pixels.",
+            },
+            "target_icc": {
+                "type": "string",
+                "description": "Optional path to target ICC profile or 'sRGB'.",
+            },
+            "preview_path": {
+                "type": "string",
+                "description": "Optional explicit path to save the verification preview.",
+            },
+        },
+        "required": ["input_path", "output_path", "width_in", "height_in"],
+    },
+}
+

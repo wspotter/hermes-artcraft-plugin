@@ -11,3 +11,4 @@ Use ArtCraft's CLI tools instead of GUI clicking whenever possible:
 2. **Inspect the photograph first**: Load the `photo-inspection` skill. Use `artcraft_prepare_inspection` to generate whole-photo previews, 1:1 native crops, print PPI ratings, and measured clues (endpoint clipping, sharpness, noise) without altering the source file. For quick metadata checks, use `artcraft_inspect`.
 3. For a localized blemish or scratch, load `photocraft-cli-edits` and use `photocraft_spot_heal`. Review the changed area before delivery.
 4. For LightCraft discovery, load `lightcraft-cli-edits`. Use `artcraft_verify_edit` to compare compatible raster exports made through your configured workflow.
+5. **Prepare print files**: Load the `print-preparation` skill. Use `artcraft_prepare_print` to calculate dimensions and target PPI, enforce the aspect ratio clarification gate (borderless crop vs margins), preserve color profiles and master copies, and verify the final deliverable.

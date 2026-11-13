@@ -7,6 +7,7 @@ from typing import Any, Dict
 
 from .discovery import discover_all
 from .inspect import prepare_inspection
+from .print_prep import prepare_print
 from .runner import run_artcraft_cli, spot_heal
 from .verify import inspect_image, verify_edit
 
@@ -115,3 +116,41 @@ def photocraft_spot_heal(args: Dict[str, Any], **kwargs: Any) -> str:
         )
     except (KeyError, OSError, TypeError, ValueError) as exc:
         return json.dumps({"ok": False, "error": str(exc)})
+
+
+def artcraft_prepare_print(args: Dict[str, Any], **kwargs: Any) -> str:
+    """Prepare a verified print delivery file or return clarification needed."""
+    try:
+        input_path = args.get("input_path")
+        output_path = args.get("output_path")
+        width_in = args.get("width_in")
+        height_in = args.get("height_in")
+
+        if not isinstance(input_path, str) or not input_path.strip():
+            return json.dumps({"ok": False, "error": "Missing required 'input_path' string"})
+        if not isinstance(output_path, str) or not output_path.strip():
+            return json.dumps({"ok": False, "error": "Missing required 'output_path' string"})
+        if width_in is None or height_in is None:
+            return json.dumps({"ok": False, "error": "Missing required 'width_in' or 'height_in'"})
+
+        result = prepare_print(
+            input_path=input_path,
+            output_path=output_path,
+            width_in=float(width_in),
+            height_in=float(height_in),
+            orientation=args.get("orientation", "auto"),
+            fit_mode=args.get("fit_mode", "auto"),
+            confirm_crop=bool(args.get("confirm_crop", False)),
+            ppi=int(args.get("ppi", 300)),
+            output_format=args.get("output_format", "auto"),
+            margin_color=args.get("margin_color", "white"),
+            preserve_master_path=args.get("preserve_master_path"),
+            allow_upscale=bool(args.get("allow_upscale", False)),
+            target_icc=args.get("target_icc"),
+            preview_path=args.get("preview_path"),
+            overwrite=bool(args.get("overwrite", False)),
+        )
+        return json.dumps(result)
+    except Exception as exc:
+        return json.dumps({"ok": False, "error": str(exc)})
+

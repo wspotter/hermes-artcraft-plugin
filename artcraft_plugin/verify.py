@@ -9,10 +9,11 @@ from typing import Any, Dict, Optional, Sequence
 from PIL import Image, ImageChops
 
 
-def sha256_file(path: Path) -> str:
+def sha256_file(path: Path | str) -> str:
     """Return the hex SHA-256 digest of a file."""
+    path_obj = Path(path)
     digest = hashlib.sha256()
-    with path.open("rb") as handle:
+    with path_obj.open("rb") as handle:
         for chunk in iter(lambda: handle.read(65536), b""):
             digest.update(chunk)
     return digest.hexdigest()

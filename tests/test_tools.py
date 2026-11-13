@@ -46,6 +46,7 @@ class TestToolsAndPluginRegistration(unittest.TestCase):
                 "artcraft_status",
                 "artcraft_inspect",
                 "artcraft_prepare_inspection",
+                "artcraft_prepare_print",
                 "artcraft_verify_edit",
                 "photocraft_run",
                 "photocraft_spot_heal",
@@ -220,3 +221,35 @@ class TestToolsAndPluginRegistration(unittest.TestCase):
             self.assertGreaterEqual(len(res["inspection_artifacts"]["native_resolution_crops"]), 1)
             self.assertIn("measured_clues", res)
             self.assertIn("measurement_limits", res["measured_clues"])
+
+    def test_prepare_print_tool(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            src = root / "input.png"
+            out = root / "output.png"
+            # 800x1000 has 4:5 aspect ratio, matching 8x10
+            Image.new("RGB", (800, 1000), color=(100, 150, 200)).save(src)
+
+            # Missing required inputs
+            missing_res = json.loads(tools.artcraft_prepare_print({}))
+            self.assertFalse(missing_res["ok"])
+            self.assertIn("Missing required", missing_res["error"])
+
+            # Valid matching call
+            res = json.loads(
+                tools.artcraft_prepare_print(
+                    {
+                        "input_path": str(src),
+                        "output_path": str(out),
+                        "width_in": 8.0,
+                        "height_in": 10.0,
+                        "ppi": 100,
+                    }
+                )
+            )
+            self.assertTrue(res["ok"])
+            self.assertEqual(res["status"], "prepared")
+            self.assertEqual(res["delivery_file"]["width_px"], 800)
+            self.assertEqual(res["delivery_file"]["height_px"], 1000)
+            self.assertTrue(out.exists())
+
