@@ -251,3 +251,194 @@ ARTCRAFT_PREPARE_PRINT = {
     },
 }
 
+ARTCRAFT_RESTORE_STEP = {
+    "name": "artcraft_restore_step",
+    "description": (
+        "Apply a verified restoration recipe to an aged or damaged photograph: "
+        "faded_tones, color_cast, dust_and_scratches, noise_and_grain, sharpening, enlargement. "
+        "Stores a checkpoint and native-resolution comparison crops before and after the step. "
+        "Enforces the Stop/Ask Gate: refuses destructive operations and hallucinated reconstructions "
+        "without explicit approval."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "input_path": {
+                "type": "string",
+                "description": "Path to the input photo (or previous checkpoint).",
+            },
+            "output_path": {
+                "type": "string",
+                "description": "Path to write the restored output photo.",
+            },
+            "recipe": {
+                "type": "string",
+                "enum": [
+                    "faded_tones",
+                    "color_cast",
+                    "dust_and_scratches",
+                    "noise_and_grain",
+                    "sharpening",
+                    "enlargement",
+                ],
+                "description": "Restoration recipe name.",
+            },
+            "parameters": {
+                "type": "object",
+                "description": "Optional recipe parameters (e.g. contrast, shadow_lift, color_temp, noise_strength, radius).",
+            },
+            "region": {
+                "type": "array",
+                "items": {"type": "integer"},
+                "minItems": 4,
+                "maxItems": 4,
+                "description": "Optional [x, y, width, height] region for localized healing or crop focus.",
+            },
+            "checkpoint_dir": {
+                "type": "string",
+                "description": "Directory to store checkpoint manifest and comparison crops.",
+            },
+            "step_name": {
+                "type": "string",
+                "description": "Optional custom name for this checkpoint step (e.g. '01_faded_tones').",
+            },
+            "crop_regions": {
+                "type": "array",
+                "items": {
+                    "type": "array",
+                    "items": {"type": "integer"},
+                    "minItems": 4,
+                    "maxItems": 4,
+                },
+                "description": "Optional list of [x, y, w, h] regions for before/after comparison crops.",
+            },
+            "target_print_ppi": {
+                "type": "integer",
+                "default": 300,
+                "description": "Target print resolution in PPI for simulated print-scale crops (default 300).",
+            },
+            "reconstruct_missing": {
+                "type": "boolean",
+                "default": False,
+                "description": "Set true if request requires reconstructing missing features (triggers Stop/Ask Gate).",
+            },
+            "content_type": {
+                "type": "string",
+                "description": "Content type hint (e.g. 'missing_face', 'missing_lettering'). Triggers Stop/Ask Gate.",
+            },
+            "allow_overwrite": {
+                "type": "boolean",
+                "default": False,
+                "description": "Allow overwriting output_path if it already exists.",
+            },
+            "timeout_s": {
+                "type": "number",
+                "default": 120.0,
+                "description": "CLI timeout in seconds.",
+            },
+        },
+        "required": ["input_path", "output_path", "recipe"],
+    },
+}
+
+ARTCRAFT_CHECKPOINT = {
+    "name": "artcraft_checkpoint",
+    "description": "Inspect and list restoration checkpoints and comparison crops for a restoration session.",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "action": {
+                "type": "string",
+                "enum": ["list", "get"],
+                "description": "Action to perform: 'list' all checkpoints or 'get' details for one step.",
+            },
+            "checkpoint_dir": {
+                "type": "string",
+                "description": "Path to the checkpoint directory containing manifest.json.",
+            },
+            "step_identifier": {
+                "description": "Step index (integer) or step name (string) when action is 'get'.",
+            },
+        },
+        "required": ["action", "checkpoint_dir"],
+    },
+}
+
+ARTCRAFT_BUILD_REVIEW = {
+    "name": "artcraft_build_review",
+    "description": (
+        "Build a structured review package for an image edit: whole-photo before/after previews, "
+        "native-resolution repaired-area crops with local texture variance metrics, source/output hashes, "
+        "mechanical checks (dimensions, aspect ratio, format, ICC), concise summary of changes & concerns, "
+        "and automated defect detection flags: untouched scratch / no-op (0 changed pixels), unwanted crop "
+        "(unexpected aspect or framing change), and smeared repair (>80% variance collapse). "
+        "Supports bounded retry tracking (retry_count, max_retries, last_checkpoint_path)."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "source_path": {"type": "string", "description": "Original source image path."},
+            "output_path": {"type": "string", "description": "Edited/repaired output image path."},
+            "regions": {
+                "type": "array",
+                "items": {"type": "array", "items": {"type": "integer"}, "minItems": 4, "maxItems": 4},
+                "description": "Optional list of target repair regions [x, y, width, height] in source pixels.",
+            },
+            "region": {
+                "type": "array",
+                "items": {"type": "integer"},
+                "minItems": 4,
+                "maxItems": 4,
+                "description": "Optional single repair region [x, y, width, height].",
+            },
+            "working_dir": {"type": "string", "description": "Optional directory to store previews and crops."},
+            "max_preview_dimension": {"type": "integer", "default": 1024, "description": "Max preview size in px."},
+            "crop_size": {"type": "integer", "default": 256, "description": "Native crop dimension in px."},
+            "expected_aspect": {"type": "string", "description": "Optional expected aspect ratio (e.g. '4:5' or 0.8)."},
+            "preserve_framing": {"type": "boolean", "default": True, "description": "Whether framing/aspect must match source unless authorized."},
+            "retry_count": {"type": "integer", "default": 0, "description": "Current retry attempt index."},
+            "max_retries": {"type": "integer", "default": 3, "description": "Maximum allowed retry attempts."},
+            "last_checkpoint_path": {"type": "string", "description": "Path to last known good checkpoint to resume from on failure."},
+        },
+        "required": ["source_path", "output_path"],
+    },
+}
+
+ARTCRAFT_JOB = {
+    "name": "artcraft_job",
+    "description": (
+        "Manage deterministic ArtCraft job workspaces (source/, work/, previews/, exports/, job.json). "
+        "Supports creating/initializing jobs, saving checkpoints, resuming from the last verified checkpoint, "
+        "recording verified export artifacts, recording delivery receipts, preventing duplicate deliveries of "
+        "the same hash to the same destination, and reconciling uncertain delivery receipts before retrying."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "action": {
+                "type": "string",
+                "enum": ["init", "checkpoint", "resume", "export", "deliver", "reconcile", "status"],
+                "description": "Job action to perform.",
+            },
+            "job_id": {"type": "string", "description": "Unique job identifier."},
+            "workspace_dir": {"type": "string", "description": "Optional base workspace directory."},
+            "source_path": {"type": "string", "description": "Source image path (used with 'init')."},
+            "stage": {"type": "string", "description": "Stage name for checkpoint (e.g. 'spot_heal', 'print_prep')."},
+            "file_path": {"type": "string", "description": "File path for checkpoint or export artifact."},
+            "verified": {"type": "boolean", "default": True, "description": "Whether checkpoint or artifact is verified (default true)."},
+            "artifact_id": {"type": "string", "description": "Artifact identifier for export or delivery."},
+            "destination": {"type": "string", "description": "Destination file path or URI for delivery or reconciliation."},
+            "status": {
+                "type": "string",
+                "enum": ["pending", "delivered", "uncertain", "failed"],
+                "description": "Delivery status (default 'pending' for deliver; or 'delivered'/'failed' for reconcile).",
+            },
+            "receipt_id": {"type": "string", "description": "Optional delivery receipt ID for reconcile."},
+            "notes": {"type": "string", "description": "Optional notes or reason for delivery/reconciliation."},
+            "metadata": {"type": "object", "description": "Optional arbitrary metadata dict."},
+        },
+        "required": ["action", "job_id"],
+    },
+}
+
+

@@ -58,6 +58,18 @@ def register(ctx: Any) -> None:
         schema=schemas.PHOTOCRAFT_SPOT_HEAL,
         handler=tools.photocraft_spot_heal,
     )
+    ctx.register_tool(
+        name="artcraft_restore_step",
+        toolset="artcraft",
+        schema=schemas.ARTCRAFT_RESTORE_STEP,
+        handler=tools.artcraft_restore_step,
+    )
+    ctx.register_tool(
+        name="artcraft_checkpoint",
+        toolset="artcraft",
+        schema=schemas.ARTCRAFT_CHECKPOINT,
+        handler=tools.artcraft_checkpoint,
+    )
 
     if hasattr(ctx, "register_cli_command"):
         ctx.register_cli_command(

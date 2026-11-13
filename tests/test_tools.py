@@ -51,6 +51,8 @@ class TestToolsAndPluginRegistration(unittest.TestCase):
                 "photocraft_run",
                 "photocraft_spot_heal",
                 "lightcraft_run",
+                "artcraft_restore_step",
+                "artcraft_checkpoint",
             },
         )
         for tool in ctx.tools.values():
@@ -252,4 +254,42 @@ class TestToolsAndPluginRegistration(unittest.TestCase):
             self.assertEqual(res["delivery_file"]["width_px"], 800)
             self.assertEqual(res["delivery_file"]["height_px"], 1000)
             self.assertTrue(out.exists())
+
+    def test_restore_step_and_checkpoint_tools(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            src = root / "input.png"
+            out = root / "out_restored.png"
+            cp_dir = root / "checkpoints"
+            Image.new("RGB", (200, 200), color=(110, 110, 110)).save(src)
+
+            # Test missing arguments
+            missing_res = json.loads(tools.artcraft_restore_step({}))
+            self.assertFalse(missing_res["ok"])
+
+            # Test stop/ask gate via tool
+            gate_res = json.loads(
+                tools.artcraft_restore_step(
+                    {
+                        "input_path": str(src),
+                        "output_path": str(out),
+                        "recipe": "faded_tones",
+                        "reconstruct_missing": True,
+                        "checkpoint_dir": str(cp_dir),
+                    }
+                )
+            )
+            self.assertFalse(gate_res["ok"])
+            self.assertEqual(gate_res["status"], "needs_decision")
+            self.assertTrue(gate_res["original_intact"])
+            self.assertFalse(out.exists())
+
+            # Test checkpoint tool list empty
+            list_res = json.loads(
+                tools.artcraft_checkpoint({"action": "list", "checkpoint_dir": str(cp_dir)})
+            )
+            self.assertTrue(list_res["ok"])
+            self.assertEqual(list_res["checkpoints"], [])
+
+
 

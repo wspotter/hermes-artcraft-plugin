@@ -7,7 +7,18 @@ from typing import Any, Dict
 
 from .discovery import discover_all
 from .inspect import prepare_inspection
+from .jobs import (
+    get_job,
+    init_job,
+    record_delivery,
+    record_export_artifact,
+    reconcile_delivery,
+    resume_job,
+    save_checkpoint,
+)
 from .print_prep import prepare_print
+from .restore import get_checkpoint, list_checkpoints, restore_step
+from .review import build_review_package
 from .runner import run_artcraft_cli, spot_heal
 from .verify import inspect_image, verify_edit
 
@@ -153,4 +164,189 @@ def artcraft_prepare_print(args: Dict[str, Any], **kwargs: Any) -> str:
         return json.dumps(result)
     except Exception as exc:
         return json.dumps({"ok": False, "error": str(exc)})
+
+
+def artcraft_restore_step(args: Dict[str, Any], **kwargs: Any) -> str:
+    """Execute a single verified restoration step with checkpointing and crop comparisons."""
+    try:
+        input_path = args.get("input_path")
+        output_path = args.get("output_path")
+        recipe = args.get("recipe")
+        if not input_path or not output_path or not recipe:
+            return json.dumps({
+                "ok": False,
+                "error": "Missing required 'input_path', 'output_path', or 'recipe'",
+            })
+
+        result = restore_step(
+            input_path=input_path,
+            output_path=output_path,
+            recipe=recipe,
+            parameters=args.get("parameters"),
+            region=args.get("region"),
+            checkpoint_dir=args.get("checkpoint_dir"),
+            step_name=args.get("step_name"),
+            crop_regions=args.get("crop_regions"),
+            target_print_ppi=int(args.get("target_print_ppi", 300)),
+            reconstruct_missing=bool(args.get("reconstruct_missing", False)),
+            content_type=args.get("content_type"),
+            allow_overwrite=bool(args.get("allow_overwrite", False)),
+            timeout_s=float(args.get("timeout_s", 120.0)),
+        )
+        return json.dumps(result)
+    except Exception as exc:
+        return json.dumps({"ok": False, "error": str(exc)})
+
+
+def artcraft_checkpoint(args: Dict[str, Any], **kwargs: Any) -> str:
+    """Inspect or list restoration checkpoints."""
+    try:
+        action = args.get("action", "list")
+        checkpoint_dir = args.get("checkpoint_dir")
+        if not checkpoint_dir:
+            return json.dumps({"ok": False, "error": "Missing required 'checkpoint_dir'"})
+
+        if action == "list":
+            checkpoints = list_checkpoints(checkpoint_dir)
+            return json.dumps({"ok": True, "checkpoints": checkpoints})
+        elif action == "get":
+            step_identifier = args.get("step_identifier")
+            if step_identifier is None:
+                return json.dumps({"ok": False, "error": "Missing 'step_identifier' for get action"})
+            cp = get_checkpoint(checkpoint_dir, step_identifier)
+            if cp is None:
+                return json.dumps({"ok": False, "error": f"Checkpoint '{step_identifier}' not found"})
+            return json.dumps({"ok": True, "checkpoint": cp})
+        else:
+            return json.dumps({"ok": False, "error": f"Unknown action: {action!r}"})
+    except Exception as exc:
+        return json.dumps({"ok": False, "error": str(exc)})
+
+
+def artcraft_build_review(args: Dict[str, Any], **kwargs: Any) -> str:
+    """Build a review package for an image edit and detect defect traps."""
+    try:
+        source_path = args.get("source_path")
+        output_path = args.get("output_path")
+        if not isinstance(source_path, str) or not source_path.strip():
+            return json.dumps({"ok": False, "passed": False, "error": "Missing required 'source_path' string"})
+        if not isinstance(output_path, str) or not output_path.strip():
+            return json.dumps({"ok": False, "passed": False, "error": "Missing required 'output_path' string"})
+
+        result = build_review_package(
+            source_path=source_path,
+            output_path=output_path,
+            regions=args.get("regions"),
+            region=args.get("region"),
+            working_dir=args.get("working_dir"),
+            max_preview_dimension=int(args.get("max_preview_dimension", 1024)),
+            crop_size=int(args.get("crop_size", 256)),
+            expected_aspect=args.get("expected_aspect"),
+            preserve_framing=bool(args.get("preserve_framing", True)),
+            retry_count=int(args.get("retry_count", 0)),
+            max_retries=int(args.get("max_retries", 3)),
+            last_checkpoint_path=args.get("last_checkpoint_path"),
+        )
+        return json.dumps(result)
+    except Exception as exc:
+        return json.dumps({"ok": False, "passed": False, "error": str(exc)})
+
+
+def artcraft_job(args: Dict[str, Any], **kwargs: Any) -> str:
+    """Manage deterministic job workspaces, checkpoints, exports, deliveries, and reconciliation."""
+    action = args.get("action")
+    job_id = args.get("job_id")
+    if not isinstance(action, str) or not action.strip():
+        return json.dumps({"ok": False, "error": "Missing required 'action' string"})
+    if not isinstance(job_id, str) or not job_id.strip():
+        return json.dumps({"ok": False, "error": "Missing required 'job_id' string"})
+
+    workspace_dir = args.get("workspace_dir")
+    try:
+        if action == "init":
+            res = init_job(
+                job_id=job_id,
+                source_path=args.get("source_path"),
+                workspace_dir=workspace_dir,
+                metadata=args.get("metadata"),
+            )
+            return json.dumps({"ok": True, "job": res})
+
+        elif action == "checkpoint":
+            stage = args.get("stage")
+            file_path = args.get("file_path")
+            if not stage or not file_path:
+                return json.dumps({"ok": False, "error": "Checkpoint action requires 'stage' and 'file_path'"})
+            res = save_checkpoint(
+                job_id=job_id,
+                stage=str(stage),
+                file_path=str(file_path),
+                verified=bool(args.get("verified", True)),
+                workspace_dir=workspace_dir,
+                metadata=args.get("metadata"),
+            )
+            return json.dumps(res)
+
+        elif action == "resume":
+            res = resume_job(job_id=job_id, workspace_dir=workspace_dir)
+            return json.dumps(res)
+
+        elif action == "export":
+            artifact_id = args.get("artifact_id")
+            file_path = args.get("file_path")
+            if not artifact_id or not file_path:
+                return json.dumps({"ok": False, "error": "Export action requires 'artifact_id' and 'file_path'"})
+            res = record_export_artifact(
+                job_id=job_id,
+                artifact_id=str(artifact_id),
+                file_path=str(file_path),
+                verified=bool(args.get("verified", True)),
+                workspace_dir=workspace_dir,
+                metadata=args.get("metadata"),
+            )
+            return json.dumps(res)
+
+        elif action == "deliver":
+            destination = args.get("destination")
+            artifact_id = args.get("artifact_id")
+            if not destination or not artifact_id:
+                return json.dumps({"ok": False, "error": "Deliver action requires 'destination' and 'artifact_id'"})
+            res = record_delivery(
+                job_id=job_id,
+                destination=str(destination),
+                artifact_id=str(artifact_id),
+                status=str(args.get("status", "pending")),
+                workspace_dir=workspace_dir,
+                receipt_id=args.get("receipt_id"),
+                notes=args.get("notes"),
+            )
+            return json.dumps(res)
+
+        elif action == "reconcile":
+            destination = args.get("destination")
+            if not destination:
+                return json.dumps({"ok": False, "error": "Reconcile action requires 'destination'"})
+            res = reconcile_delivery(
+                job_id=job_id,
+                destination=str(destination),
+                receipt_id=args.get("receipt_id"),
+                confirmed_status=args.get("status"),
+                workspace_dir=workspace_dir,
+                notes=args.get("notes"),
+            )
+            return json.dumps(res)
+
+        elif action == "status":
+            job = get_job(job_id=job_id, workspace_dir=workspace_dir)
+            return json.dumps({"ok": True, "job": job})
+
+        else:
+            return json.dumps({"ok": False, "error": f"Unknown job action '{action}'"})
+
+    except Exception as exc:
+        return json.dumps({"ok": False, "error": str(exc)})
+
+
+
+
 
