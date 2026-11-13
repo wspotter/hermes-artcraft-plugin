@@ -91,3 +91,67 @@ def run_artcraft_cli(
             result["error"] = verification.get("reason", "verification_failed")
 
     return result
+
+
+def spot_heal(input_path: str, output_path: str, points: list, size: int, region: list) -> dict:
+    """Heal a visible defect and publish a new PNG only after verification."""
+    import json
+    import os
+    import shutil
+    from tempfile import TemporaryDirectory
+
+    from .verify import _validate_region, inspect_image, sha256_file
+
+    source = Path(input_path).expanduser().resolve(strict=True)
+    target = Path(output_path).expanduser().absolute()
+    if target.suffix.lower() != ".png" or os.path.lexists(target):
+        raise ValueError("output_path must name a new PNG in an existing directory")
+    info = inspect_image(str(source))
+    if not info.get("valid"):
+        raise ValueError("input_path must be a readable image")
+    if not isinstance(region, list) or any(type(v) is not int for v in region):
+        raise ValueError("region must contain four integer coordinates")
+    left, top, right, bottom = _validate_region(region, info["width"], info["height"])
+    if type(size) is not int or not 1 <= size <= 256:
+        raise ValueError("size must be an integer between 1 and 256")
+    if not isinstance(points, list) or not 1 <= len(points) <= 512:
+        raise ValueError("provide 1 to 512 stroke points")
+    for point in points:
+        if (
+            not isinstance(point, list)
+            or len(point) != 2
+            or any(type(v) is not int for v in point)
+            or not (left <= point[0] < right and top <= point[1] < bottom)
+        ):
+            raise ValueError("stroke points must be integer [x, y] pairs inside region")
+
+    with TemporaryDirectory(prefix=".artcraft-", dir=target.parent) as directory:
+        work = Path(directory) / ("source" + source.suffix)
+        output = Path(directory) / "healed.png"
+        shutil.copyfile(source, work)
+        if sha256_file(work) != info["sha256"]:
+            raise ValueError("source changed while staging")
+        result = run_artcraft_cli(
+            "photocraft",
+            ["run", str(work), "--cmd", "paint.spotHealing", "--params",
+             json.dumps({"points": points, "size": size}), "--out", str(output)],
+            input_path=str(source), output_path=str(output),
+            expected_width=info["width"], expected_height=info["height"], region=region,
+        )
+        if not result["ok"]:
+            return {"ok": False, "error": result["error"], "stderr": result.get("stderr", "")[-1000:]}
+        verification = result["verification"]
+        diff = verification["pixel_diff"]
+        outside = diff["changed_pixels"] - diff["region"]["changed_pixels"]
+        if outside:
+            return {"ok": False, "error": "pixels_changed_outside_region", "outside_pixels": outside}
+        if sha256_file(source) != info["sha256"]:
+            raise ValueError("source changed during the edit")
+        if verification["output"]["format"] != "PNG":
+            raise ValueError("PhotoCraft did not produce a PNG")
+        os.link(output, target)
+        return {
+            "ok": True, "output_path": str(target), "source_sha256": info["sha256"],
+            "output_sha256": verification["output"]["sha256"],
+            "region": region, "changed_pixels": diff["changed_pixels"], "outside_pixels": 0,
+        }

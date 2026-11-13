@@ -2,16 +2,15 @@
 
 A [Hermes Agent](https://github.com/NousResearch/hermes-agent) plugin for driving the **ArtCraft** creative suite (**PhotoCraft**, **LightCraft**, **FilmCraft**, **SoundCraft**) via their paired CLI tools—with non-destructive output guards and automatic post-edit pixel-diff verification.
 
-## Why This Plugin Exists
+## What it does
 
-ArtCraft apps expose headless CLIs and MCP servers, but agents still hit two common failure modes:
-1. **Silent no-op edits:** A command exits `0` while writing an untouched copy of the input image.
-2. **Accidental overwrites or GUI fragility:** Driving the GUI is slow and easily blocked by dialogs, while raw shell commands can clobber source files.
+PhotoCraft spot healing stages a copy of the source, executes a typed stroke,
+and publishes a fresh PNG only after confirming changes inside the allowed
+region and zero changes outside it. The receipt records source and output
+hashes. Inspect the repaired area visually before delivery.
 
-`hermes-artcraft-plugin` wraps ArtCraft CLI execution in typed tools that:
-- Auto-discover paired `*-cli` binaries (`photocraft-cli`, `lightcraft-cli`, `filmcraft-cli`, `soundcraft-cli`).
-- Refuse to overwrite `input_path` with `output_path`.
-- Automatically verify that the output image is valid, matches optional target dimensions, and has **non-zero pixel changes** (globally or within a target `[x, y, w, h]` region).
+The plugin discovers all four CLIs. PhotoCraft and LightCraft also expose
+help and version probes. Automated editing currently covers PhotoCraft spot healing.
 
 ## Installation
 
@@ -27,6 +26,8 @@ cd hermes-artcraft-plugin
 pip install -e ".[dev]"
 ```
 
+Enable the `artcraft` plugin in Hermes and make Pillow available in its Python environment.
+
 Set `ARTCRAFT_BIN_DIR` if your ArtCraft `*-cli` binaries live outside `PATH` and `~/.local/bin`.
 
 ## Tools Registered (`toolset: artcraft`)
@@ -36,8 +37,9 @@ Set `ARTCRAFT_BIN_DIR` if your ArtCraft `*-cli` binaries live outside `PATH` and
 | `artcraft_status` | Discover installed ArtCraft CLIs and report paths + versions |
 | `artcraft_inspect` | Inspect image format, color mode, dimensions, DPI, and SHA-256 |
 | `artcraft_verify_edit` | Verify output validity, dimensions, and pixel diff (full image or `[x, y, w, h]` region) |
-| `photocraft_run` | Run `photocraft-cli` with non-destructive guard + automatic `verify_edit` |
-| `lightcraft_run` | Run `lightcraft-cli` with non-destructive guard + automatic `verify_edit` |
+| `photocraft_spot_heal` | Apply a localized stroke and publish a verified PNG |
+| `photocraft_run` | Show PhotoCraft CLI help or version |
+| `lightcraft_run` | Show LightCraft CLI help or version |
 
 ## CLI Subcommands
 

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from artcraft_plugin import cli, schemas, tools
+from .artcraft_plugin import cli, schemas, tools
 
 
 def register(ctx: Any) -> None:
@@ -40,9 +40,17 @@ def register(ctx: Any) -> None:
         handler=tools.lightcraft_run,
     )
 
+    ctx.register_tool(
+        name="photocraft_spot_heal",
+        toolset="artcraft",
+        schema=schemas.PHOTOCRAFT_SPOT_HEAL,
+        handler=tools.photocraft_spot_heal,
+    )
+
     if hasattr(ctx, "register_cli_command"):
         ctx.register_cli_command(
             "artcraft",
-            cli.register_cli,
+            help="Inspect ArtCraft CLIs and verify edited images",
+            setup_fn=cli.register_cli,
             description="Inspect ArtCraft CLIs and verify edited images",
         )

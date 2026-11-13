@@ -64,18 +64,15 @@ def find_cli_binary(
     if not names:
         raise ValueError(f"Unknown ArtCraft app: {app!r}")
 
-    for name in names:
-        found = shutil.which(name)
-        if found:
-            return Path(found)
-
+    name = names[0]
     for directory in _candidate_dirs(extra_dirs):
-        if not directory.is_dir():
-            continue
-        for name in names:
-            candidate = directory / name
-            if candidate.is_file() and os.access(candidate, os.X_OK):
-                return candidate
+        candidate = directory / name
+        if candidate.is_file() and os.access(candidate, os.X_OK):
+            return candidate
+
+    found = shutil.which(name)
+    if found:
+        return Path(found)
     return None
 
 

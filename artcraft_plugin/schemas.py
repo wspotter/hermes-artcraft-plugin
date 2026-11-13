@@ -73,67 +73,41 @@ ARTCRAFT_VERIFY_EDIT = {
     },
 }
 
-_CLI_RUN_PROPERTIES = {
-    "cli_args": {
-        "type": "array",
-        "items": {"type": "string"},
-        "description": "Arguments to pass directly to the CLI executable.",
-    },
-    "input_path": {
-        "type": "string",
-        "description": "Source image path (used for non-destructive guard and post-edit verification).",
-    },
-    "output_path": {
-        "type": "string",
-        "description": "Target output path (must differ from input_path).",
-    },
-    "expected_width": {
-        "type": "integer",
-        "description": "Optional expected output width in pixels.",
-    },
-    "expected_height": {
-        "type": "integer",
-        "description": "Optional expected output height in pixels.",
-    },
-    "region": {
-        "type": "array",
-        "items": {"type": "integer"},
-        "minItems": 4,
-        "maxItems": 4,
-        "description": "Optional [x, y, width, height] region to verify pixel changes.",
-    },
-    "verify": {
-        "type": "boolean",
-        "description": "Run automatic post-edit verification when input_path and output_path are set (default true).",
-    },
-    "timeout_s": {
-        "type": "number",
-        "description": "Command timeout in seconds (default 120).",
-    },
-}
+def _cli_probe_schema(app):
+    return {
+        "name": f"{app}_run",
+        "description": f"Show {app}-cli help or version.",
+        "parameters": {
+            "type": "object",
+            "properties": {"cli_args": {
+                "type": "array", "items": {"enum": ["--help", "--version"]},
+                "minItems": 1, "maxItems": 1,
+            }},
+            "required": ["cli_args"],
+        },
+    }
 
-PHOTOCRAFT_RUN = {
-    "name": "photocraft_run",
-    "description": (
-        "Run photocraft-cli with non-destructive output guards and automatic post-edit "
-        "pixel-diff verification."
-    ),
+
+PHOTOCRAFT_RUN = _cli_probe_schema("photocraft")
+LIGHTCRAFT_RUN = _cli_probe_schema("lightcraft")
+
+PHOTOCRAFT_SPOT_HEAL = {
+    "name": "photocraft_spot_heal",
+    "description": "Heal a visible scratch or blemish and save a verified new PNG.",
     "parameters": {
         "type": "object",
-        "properties": _CLI_RUN_PROPERTIES,
-        "required": ["cli_args"],
-    },
-}
-
-LIGHTCRAFT_RUN = {
-    "name": "lightcraft_run",
-    "description": (
-        "Run lightcraft-cli with non-destructive output guards and automatic post-edit "
-        "pixel-diff verification."
-    ),
-    "parameters": {
-        "type": "object",
-        "properties": _CLI_RUN_PROPERTIES,
-        "required": ["cli_args"],
+        "properties": {
+            "input_path": {"type": "string"},
+            "output_path": {"type": "string", "description": "New PNG path."},
+            "points": {"type": "array", "items": {
+                "type": "array", "items": {"type": "integer"},
+                "minItems": 2, "maxItems": 2,
+            }, "description": "Stroke points in source pixel coordinates."},
+            "size": {"type": "integer", "minimum": 1, "maximum": 256},
+            "region": {"type": "array", "items": {"type": "integer"},
+                       "minItems": 4, "maxItems": 4,
+                       "description": "[x, y, width, height] covering the allowed edit including brush edges."},
+        },
+        "required": ["input_path", "output_path", "points", "size", "region"],
     },
 }

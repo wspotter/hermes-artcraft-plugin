@@ -28,6 +28,7 @@ def inspect_image(path_str: str) -> Dict[str, Any]:
         with Image.open(path) as img:
             img.verify()
         with Image.open(path) as img:
+            img.load()
             dpi = img.info.get("dpi")
             return {
                 "exists": True,
@@ -124,6 +125,9 @@ def verify_edit(
 
     byte_identical = in_info["sha256"] == out_info["sha256"]
     same_dimensions = (in_info["width"], in_info["height"]) == (out_w, out_h)
+
+    if region is not None and not same_dimensions:
+        return {"passed": False, "reason": "region_requires_matching_dimensions"}
 
     pixel_diff: Dict[str, Any] = {"same_dimensions": same_dimensions}
     if same_dimensions:

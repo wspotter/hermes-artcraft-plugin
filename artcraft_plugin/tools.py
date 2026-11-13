@@ -6,7 +6,7 @@ import json
 from typing import Any, Dict
 
 from .discovery import discover_all
-from .runner import run_artcraft_cli
+from .runner import run_artcraft_cli, spot_heal
 from .verify import inspect_image, verify_edit
 
 
@@ -58,21 +58,10 @@ def artcraft_verify_edit(args: Dict[str, Any], **kwargs: Any) -> str:
 
 def _run_app_cli(app: str, args: Dict[str, Any]) -> str:
     cli_args = args.get("cli_args")
-    if not isinstance(cli_args, list) or not all(isinstance(x, str) for x in cli_args):
-        return json.dumps({"ok": False, "error": "cli_args must be a list of strings"})
+    if cli_args not in (["--help"], ["--version"]):
+        return json.dumps({"ok": False, "error": "Only --help and --version are supported"})
     try:
-        result = run_artcraft_cli(
-            app,
-            cli_args,
-            input_path=args.get("input_path"),
-            output_path=args.get("output_path"),
-            expected_width=args.get("expected_width"),
-            expected_height=args.get("expected_height"),
-            region=args.get("region"),
-            verify=bool(args.get("verify", True)),
-            timeout_s=float(args.get("timeout_s", 120.0)),
-        )
-        return json.dumps(result)
+        return json.dumps(run_artcraft_cli(app, cli_args))
     except Exception as exc:
         return json.dumps({"ok": False, "error": str(exc)})
 
@@ -85,3 +74,13 @@ def photocraft_run(args: Dict[str, Any], **kwargs: Any) -> str:
 def lightcraft_run(args: Dict[str, Any], **kwargs: Any) -> str:
     """Run lightcraft-cli with guards and verification."""
     return _run_app_cli("lightcraft", args)
+
+
+def photocraft_spot_heal(args: Dict[str, Any], **kwargs: Any) -> str:
+    """Run the verified spot-heal workflow."""
+    try:
+        return json.dumps(spot_heal(*(args[key] for key in (
+            "input_path", "output_path", "points", "size", "region",
+        ))))
+    except (KeyError, OSError, TypeError, ValueError) as exc:
+        return json.dumps({"ok": False, "error": str(exc)})
