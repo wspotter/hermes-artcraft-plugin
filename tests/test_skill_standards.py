@@ -25,6 +25,7 @@ EXPECTED_SKILLS = {
     "recipe-dust-scratches",
     "recipe-enlargement",
     "recipe-faded-tones",
+    "recipe-maker",
     "recipe-noise-grain",
     "recipe-sharpening",
     "soundcraft-basics",

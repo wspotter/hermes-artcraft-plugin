@@ -113,7 +113,7 @@ The agent tool (`artcraft_build_review`) accepts the same object as `crop_geomet
 
 ## Bundled Skills (`skills/`)
 
-All 15 bundled `SKILL.md` files comply with Hermes skill authoring standards:
+All 16 bundled `SKILL.md` files comply with Hermes skill authoring standards:
 
 - `artcraft-router` — Route creative media tasks across the ArtCraft CLI suite.
 - `lightcraft-basics` — Develop and render photos non-destructively.
@@ -124,6 +124,7 @@ All 15 bundled `SKILL.md` files comply with Hermes skill authoring standards:
 - `print-preparation` — Format print-ready images with aspect and PPI checks.
 - `photocraft-cli-edits` — Apply localized spot healing with pixel-diff verification.
 - `lightcraft-cli-edits` — Inspect LightCraft CLI flags and verify exported images.
+- `recipe-maker` — Design, test, and save reusable ArtCraft workflow skills.
 - `recipe-faded-tones` — Restore compressed tonal range without clipping endpoints.
 - `recipe-color-cast` — Remove unwanted color tints while preserving skin tones.
 - `recipe-dust-scratches` — Heal isolated dust specks and scratches without blurring.

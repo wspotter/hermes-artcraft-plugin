@@ -18,6 +18,7 @@ metadata:
       - filmcraft-basics
       - print-preparation
       - photo-restoration
+      - recipe-maker
 ---
 
 # ArtCraft Router Skill
@@ -54,6 +55,7 @@ Or call `artcraft_status` via tool invocation.
 7. **Prepare print deliverables**: Load `print-preparation` and call `artcraft_prepare_print` (`hermes artcraft prep-print`) to enforce aspect-ratio clarification gates, target PPI, and color profile preservation.
 8. **Run checkpointed photo restoration**: Load `photo-restoration` (and recipe skills `recipe-faded-tones`, `recipe-color-cast`, `recipe-dust-scratches`, `recipe-noise-grain`, `recipe-sharpening`, `recipe-enlargement`). Use `artcraft_restore_step` and `artcraft_checkpoint`, honoring `status: "needs_decision"` Stop/Ask gates.
 9. **Build reviews & manage jobs**: Use `artcraft_build_review` (`hermes artcraft review`) for quality-trap detection and before/after crop packages, `artcraft_verify_edit` (`hermes artcraft verify`) for pixel-diff bounds checks, and `artcraft_job` (`hermes artcraft job`) for deterministic job folders and delivery receipt reconciliation.
+10. **Author new reusable recipes**: Load `recipe-maker` when capturing, prototyping, verifying, and saving a new custom ArtCraft workflow skill (`skills/recipe-<slug>/SKILL.md`).
 
 ## Pitfalls
 
