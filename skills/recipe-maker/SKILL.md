@@ -20,7 +20,7 @@ metadata:
 
 # Recipe Maker Skill
 
-Design, prototype, verify, and save a new reusable ArtCraft recipe skill (`skills/recipe-<slug>/SKILL.md`) across `PhotoCraft`, `LightCraft`, `FilmCraft`, and `SoundCraft`.
+Design, prototype, verify, and save a new reusable ArtCraft recipe skill across `PhotoCraft`, `LightCraft`, `FilmCraft`, and `SoundCraft` using bundled `artcraft:recipe-*` skills as reference templates.
 
 ## When to Use
 
@@ -60,8 +60,9 @@ python3 -m unittest tests/test_skill_standards.py -v
 3. **Verify Before/After Quality**:
    - Run `artcraft_build_review` or `artcraft_verify_edit` (or audio/video stream checks) on the prototype output.
    - Define concrete acceptance checks and explicit Stop/Ask thresholds (`status: "needs_decision"` or `status: "needs_clarification"`) where human review is required.
-4. **Author the Recipe Skill (`skills/recipe-<slug>/SKILL.md`)**:
-   - Use this exact YAML frontmatter and six-section structure:
+4. **Author & Save the Recipe Skill**:
+   - Because bundled plugin skills (`artcraft:recipe-*`) are read-only at runtime, save newly created user recipes into the user's writable skills directory (`~/.hermes/skills/recipe-<slug>/SKILL.md` or `<workspace_dir>/skills/recipe-<slug>/SKILL.md`, or via `skill_manage`). Only write to `skills/recipe-<slug>/SKILL.md` inside the plugin repository when explicitly developing upstream plugin skills.
+   - Use the bundled `artcraft:recipe-*` skills as reference templates and follow this exact YAML frontmatter and six-section structure:
 
 ```markdown
 ---

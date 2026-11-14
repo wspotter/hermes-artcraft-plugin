@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 from .artcraft_plugin import cli, schemas, tools
@@ -108,3 +109,11 @@ def register(ctx: Any) -> None:
             setup_fn=cli.register_cli,
             description="Inspect ArtCraft CLIs and verify edited images",
         )
+
+    if hasattr(ctx, "register_skill"):
+        skills_dir = Path(__file__).resolve().parent / "skills"
+        if skills_dir.is_dir():
+            for child in sorted(skills_dir.iterdir()):
+                skill_md = child / "SKILL.md"
+                if child.is_dir() and skill_md.exists():
+                    ctx.register_skill(child.name, skill_md)

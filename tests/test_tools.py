@@ -28,12 +28,16 @@ class _FakeCtx:
     def __init__(self) -> None:
         self.tools = {}
         self.cli_commands = {}
+        self.skills = {}
 
     def register_tool(self, *, name: str, toolset: str, schema: dict, handler) -> None:
         self.tools[name] = {"toolset": toolset, "schema": schema, "handler": handler}
 
     def register_cli_command(self, name: str, help: str, setup_fn, description: str = "") -> None:
         self.cli_commands[name] = {"register_fn": setup_fn, "description": description}
+
+    def register_skill(self, name: str, path: Path) -> None:
+        self.skills[name] = path
 
 
 class TestToolsAndPluginRegistration(unittest.TestCase):
@@ -64,6 +68,11 @@ class TestToolsAndPluginRegistration(unittest.TestCase):
         for tool in ctx.tools.values():
             self.assertEqual(tool["toolset"], "artcraft")
         self.assertIn("artcraft", ctx.cli_commands)
+        self.assertEqual(len(ctx.skills), 16)
+        self.assertIn("recipe-maker", ctx.skills)
+        self.assertIn("artcraft-router", ctx.skills)
+        for skill_path in ctx.skills.values():
+            self.assertTrue(skill_path.is_file())
 
     def test_raw_edit_arguments_are_rejected(self) -> None:
         self.assertFalse(json.loads(tools.photocraft_run({"cli_args": ["run"]}))["ok"])
