@@ -1,81 +1,95 @@
 ---
 name: photo-restoration
-description: Systematic, non-destructive photographic restoration recipes with incremental checkpointing, before/after crop comparisons, and a Stop/Ask gate for missing content.
+description: Run checkpointed photo repairs with visual review gates.
+version: "0.1.0"
+author: "wspotter"
+license: "MIT"
+platforms: [linux, macos]
+metadata:
+  hermes:
+    category: creative
+    tags: [artcraft, restoration, photography, checkpoints, quality-control]
+    related_skills:
+      - artcraft-router
+      - photo-inspection
+      - recipe-faded-tones
+      - recipe-color-cast
+      - recipe-dust-scratches
+      - recipe-noise-grain
+      - recipe-sharpening
+      - recipe-enlargement
 ---
 
-# Photo Restoration
+# Photo Restoration Skill
 
-A non-destructive, recipe-driven workflow for restoring damaged, faded, or soft photographs using verified ArtCraft CLI operations.
+Restore damaged, faded, or soft photographs through a non-destructive, checkpointed sequence of verified ArtCraft recipes (`artcraft_restore_step` and `artcraft_checkpoint`) with dual-scale before/after crops and an automated Stop/Ask gate.
 
-## Core Principles
+## When to Use
 
-1. **Non-Destructive & Sequential**: Every operation reads an immutable source or prior checkpoint and writes a fresh output file. The original photograph is never overwritten.
-2. **Incremental Checkpointing**: Save a verified checkpoint after each meaningful change (`step_001_<recipe>`, `step_002_<recipe>`). Work can be resumed from any prior checkpoint.
-3. **Dual-Scale Visual Inspection**: Every checkpoint generates matching 1:1 native-resolution and print-scale before/after crops, along with side-by-side comparison strips.
-4. **Stop/Ask Gate**: If a repair involves reconstructing missing facial identity, lettering, or important missing content, or if requested parameters exceed safe bounds, stop immediately and return `status: "needs_decision"`. Never invent or hallucinate missing features without explicit human decision.
+- Applying one or more photographic restoration steps (`faded_tones`, `color_cast`, `dust_and_scratches`, `noise_and_grain`, `sharpening`, `enlargement`).
+- Maintaining incremental checkpoints (`step_001_<recipe>`, `step_002_<recipe>`) with matching 1:1 native and print-scale comparison crops.
 
-## Restoration Recipes
+## Prerequisites
 
-| Recipe | Action | Acceptance Check | CLI Command |
-|---|---|---|---|
-| **Faded tones** | Gentle tonal correction | Preserves highlight & shadow detail without crushing | `photocraft-cli run ... --cmd image.adjustments.levels` |
-| **Color cast** | Neutral balance & color adjustment | Preserves believable skin tones & natural warmth | `photocraft-cli run ... --cmd image.adjustments.colorBalance` |
-| **Dust & scratches** | Localized healing or texture-safe filtering | Preserves nearby edges; 0 changed pixels outside region | `photocraft-cli run ... --cmd paint.spotHealing` |
-| **Noise & grain** | Selective noise reduction | Retains facial detail, lettering, and authentic texture | `photocraft-cli run ... --cmd filter.noise.reduceNoise` |
-| **Sharpening** | Restrained unsharp mask | Avoids edge halos and noise amplification | `photocraft-cli run ... --cmd filter.sharpen.unsharpMask` |
-| **Enlargement** | Proportional upscaling + output sharpening | Preserves composition, aspect ratio, and fine details | `photocraft-cli run ... --cmd image.imageSize ... --cmd filter.sharpen.unsharpMask` |
+- `photocraft-cli` installed and discoverable via `artcraft_status`.
+- Source photograph inspected first using `photo-inspection` (`artcraft_prepare_inspection`).
 
-## Tool Usage
+## How to Run
 
-### 1. Apply a Restoration Step
+### 1. Apply a Restoration Step (`artcraft_restore_step`)
+
 ```json
 {
-  "name": "artcraft_restore_step",
-  "arguments": {
-    "input_path": "/path/to/source.png",
-    "output_path": "/path/to/work/step1_faded_tones.png",
-    "recipe": "faded_tones",
-    "parameters": {
-      "in_black": 15,
-      "in_white": 240,
-      "gamma": 1.05
-    },
-    "checkpoint_dir": "/path/to/work/checkpoints",
-    "step_name": "01_faded_tones",
-    "target_print_ppi": 300
-  }
+  "input_path": "<work_dir>/source/photo.png",
+  "output_path": "<work_dir>/work/step1_faded_tones.png",
+  "recipe": "faded_tones",
+  "parameters": {
+    "in_black": 15,
+    "in_white": 240,
+    "gamma": 1.05
+  },
+  "checkpoint_dir": "<work_dir>/checkpoints",
+  "step_name": "01_faded_tones",
+  "target_print_ppi": 300
 }
 ```
 
-### 2. Inspect Checkpoints
+### 2. Inspect Checkpoints (`artcraft_checkpoint`)
+
 ```json
 {
-  "name": "artcraft_checkpoint",
-  "arguments": {
-    "action": "list",
-    "checkpoint_dir": "/path/to/work/checkpoints"
-  }
+  "action": "list",
+  "checkpoint_dir": "<work_dir>/checkpoints"
 }
 ```
 
-### 3. CLI Invocations
+### 3. CLI Subcommands
+
 ```bash
-# Run a restoration step
-hermes artcraft restore faded_tones input.png output.png --params '{"in_black": 15, "in_white": 240}'
+hermes artcraft restore faded_tones <work_dir>/source/photo.png <work_dir>/work/step1_faded_tones.png \
+  --params '{"in_black": 15, "in_white": 240}'
 
-# Trigger Stop/Ask gate on missing content
-hermes artcraft restore dust_and_scratches input.png output.png --content-type missing_face
-
-# List checkpoints
-hermes artcraft checkpoint list /path/to/work/checkpoints
+hermes artcraft checkpoint list <work_dir>/checkpoints
 ```
 
-## Unsupported Operations
+## Procedure
 
-The following operations are outside safe photographic restoration and will trigger `status: "needs_decision"`:
-- Reconstructing missing faces, facial features, or missing person identity.
-- Reconstructing missing lettering, street names, or text.
-- Generative diffusion inpainting / hallucination of destroyed image portions.
-- Extreme sharpening amounts (> 120) or radii (> 2.2) creating bright halos.
-- Crushing shadows (`in_black` > 50) or blowing highlights (`in_white` < 200).
-- Extreme upscaling scales (> 4x) without human operator instruction.
+1. **Select recipes in order**:
+   - `faded_tones` (`recipe-faded-tones`): Gentle levels adjustment preserving highlight and shadow detail.
+   - `color_cast` (`recipe-color-cast`): Neutral color balance preserving natural skin warmth.
+   - `dust_and_scratches` (`recipe-dust-scratches`): Localized spot healing or texture-safe dust filtering.
+   - `noise_and_grain` (`recipe-noise-grain`): Selective noise reduction retaining facial detail and lettering.
+   - `sharpening` (`recipe-sharpening`): Restrained unsharp mask avoiding edge halos.
+   - `enlargement` (`recipe-enlargement`): Proportional upscaling paired with output sharpening.
+2. **Execute incrementally**: Run one recipe per `artcraft_restore_step` call, passing the previous checkpoint output as the next `input_path`.
+3. **Review dual-scale crops**: Inspect the generated 1:1 native crops, print-scale crops, and side-by-side comparison strip after each step.
+4. **Build final review package**: Call `artcraft_build_review` to check for quality traps (no-op edits, unauthorized framing changes, or variance collapse >80% inside repaired areas).
+
+## Pitfalls
+
+- **Stop/Ask Gate (`status: "needs_decision"`)**: Stop immediately and ask the human operator before reconstructing missing faces, eyes, lettering, or large destroyed regions, or when parameters exceed safe bounds (`in_black > 50`, `in_white < 200`, sharpening `amount > 120` or `radius > 2.2`, upscaling `> 4x`).
+- Never overwrite the original source image or prior checkpoint files.
+
+## Verification
+
+- Confirm every step returns `status: "completed"`, unchanged `source_sha256`, verified `output_sha256`, and readable before/after comparison crops in `checkpoint_dir`.

@@ -1,8 +1,9 @@
 """Standard I/O Model Context Protocol (MCP) server for ArtCraft tools.
 
 Lightweight, zero-extra-dependency JSON-RPC 2.0 stdio server enabling
-Ollie (Hermes) and Otto (Octo) to access ArtCraft image inspection, print preparation,
-verified spot-healing, step checkpoints, review packages, and job workspaces.
+MCP clients to access ArtCraft image inspection, print preparation,
+verified spot-healing, step checkpoints, review packages, job workspaces,
+and non-destructive basics across PhotoCraft, LightCraft, FilmCraft, and SoundCraft.
 """
 
 from __future__ import annotations
@@ -13,7 +14,7 @@ from typing import Any, BinaryIO, Callable, Dict, Optional
 
 from . import schemas, tools
 
-# Registry of tools exposed over MCP to Octo / Otto
+# Registry of tools exposed over MCP
 EXPOSED_TOOLS: Dict[str, Dict[str, Any]] = {
     "artcraft_status": {
         "schema": schemas.ARTCRAFT_STATUS,
@@ -54,6 +55,18 @@ EXPOSED_TOOLS: Dict[str, Dict[str, Any]] = {
     "artcraft_job": {
         "schema": schemas.ARTCRAFT_JOB,
         "handler": tools.artcraft_job,
+    },
+    "artcraft_develop": {
+        "schema": schemas.ARTCRAFT_DEVELOP,
+        "handler": tools.artcraft_develop,
+    },
+    "artcraft_audio_basic": {
+        "schema": schemas.ARTCRAFT_AUDIO_BASIC,
+        "handler": tools.artcraft_audio_basic,
+    },
+    "artcraft_video_basic": {
+        "schema": schemas.ARTCRAFT_VIDEO_BASIC,
+        "handler": tools.artcraft_video_basic,
     },
 }
 
@@ -157,11 +170,13 @@ def process_message(message: Dict[str, Any]) -> Optional[Dict[str, Any]]:
                 },
                 "serverInfo": {
                     "name": "artcraft-plugin",
-                    "version": "0.1.0",
+                    "version": "0.2.0",
                 },
                 "instructions": (
                     "ArtCraft photo inspection, print prep, verified spot-healing, "
-                    "step checkpoints, review packages, and job workspaces."
+                    "LightCraft photo development, SoundCraft audio basics, "
+                    "FilmCraft video basics, step checkpoints, review packages, "
+                    "and job workspaces."
                 ),
             },
         }

@@ -442,4 +442,202 @@ ARTCRAFT_JOB = {
     },
 }
 
+ARTCRAFT_DEVELOP = {
+    "name": "artcraft_develop",
+    "description": (
+        "Develop and export an image or raw file non-destructively via LightCraft (`lightcraft-cli render`). "
+        "Supports develop sliders (`light.exposure`, `light.contrast`, `color.temp`, `color.vibrance`, "
+        "`detail.sharpening`, etc.), presets, long-edge resize, quality, and export options while verifying "
+        "that source_sha256 is unchanged and the output image decodes cleanly."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "input_path": {
+                "type": "string",
+                "description": "Path to the source image or raw file.",
+            },
+            "output_path": {
+                "type": "string",
+                "description": "Path for the developed output file (.jpg, .png, .tif, .webp, .avif, .jxl, .dng).",
+            },
+            "sliders": {
+                "type": "object",
+                "description": "Optional dict of develop control IDs to values (e.g. {'light.exposure': 0.5, 'light.contrast': 10}).",
+            },
+            "preset": {
+                "type": "string",
+                "description": "Optional LightCraft preset ID to apply.",
+            },
+            "long_edge": {
+                "type": "integer",
+                "minimum": 1,
+                "description": "Optional output long edge in pixels.",
+            },
+            "quality": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 100,
+                "default": 92,
+                "description": "Export quality 1..100 for lossy formats (default 92).",
+            },
+            "export_options": {
+                "type": "object",
+                "description": "Optional dict of LightCraft app.export options (e.g. {'colorSpace': 'displayP3', 'ppi': 300}).",
+            },
+            "allow_overwrite": {
+                "type": "boolean",
+                "default": False,
+                "description": "Allow overwriting output_path if it already exists (default false).",
+            },
+            "timeout_s": {
+                "type": "number",
+                "default": 120.0,
+                "description": "Optional execution timeout in seconds (default 120.0).",
+            },
+        },
+        "required": ["input_path", "output_path"],
+    },
+}
+
+ARTCRAFT_AUDIO_BASIC = {
+    "name": "artcraft_audio_basic",
+    "description": (
+        "Inspect audio metadata (`action='info'`) or non-destructively convert, resample, change bit depth, "
+        "and peak-normalize audio files (`action='convert'`) via SoundCraft (`soundcraft-cli`)."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "action": {
+                "type": "string",
+                "enum": ["info", "convert"],
+                "description": "Audio operation: 'info' to probe metadata or 'convert' to write a converted audio file.",
+            },
+            "input_path": {
+                "type": "string",
+                "description": "Path to the source audio file.",
+            },
+            "output_path": {
+                "type": "string",
+                "description": "Destination audio file path (required when action='convert').",
+            },
+            "sample_rate": {
+                "type": "integer",
+                "minimum": 1,
+                "description": "Optional target sample rate in Hz (e.g. 44100, 48000).",
+            },
+            "bit_depth": {
+                "type": "string",
+                "enum": ["16", "24", "32f"],
+                "description": "Optional output bit depth ('16', '24', or '32f').",
+            },
+            "normalize": {
+                "type": "boolean",
+                "default": False,
+                "description": "Normalize peak amplitude to -0.1 dBFS when converting (default false).",
+            },
+            "dither": {
+                "type": "boolean",
+                "description": "Optional explicit dithering toggle (true for --dither, false for --no-dither).",
+            },
+            "allow_overwrite": {
+                "type": "boolean",
+                "default": False,
+                "description": "Allow overwriting output_path if it already exists (default false).",
+            },
+            "timeout_s": {
+                "type": "number",
+                "default": 120.0,
+                "description": "Optional execution timeout in seconds (default 120.0).",
+            },
+        },
+        "required": ["action", "input_path"],
+    },
+}
+
+ARTCRAFT_VIDEO_BASIC = {
+    "name": "artcraft_video_basic",
+    "description": (
+        "Probe media containers/streams (`action='probe'`), extract a verified PNG still frame "
+        "(`action='render_frame'`), or non-destructively trim/transcode/export video (`action='export'`) "
+        "via FilmCraft (`filmcraft-cli`)."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "action": {
+                "type": "string",
+                "enum": ["probe", "render_frame", "export"],
+                "description": "Video operation: 'probe', 'render_frame', or 'export'.",
+            },
+            "input_path": {
+                "type": "string",
+                "description": "Path to a standalone media file (required for 'probe'; optional source for 'render_frame'/'export').",
+            },
+            "project_path": {
+                "type": "string",
+                "description": "Optional path to a FilmCraft project (.fcproj) for 'render_frame' or 'export'.",
+            },
+            "demo": {
+                "type": "boolean",
+                "default": False,
+                "description": "Use the built-in FilmCraft procedural demo project (default false).",
+            },
+            "output_path": {
+                "type": "string",
+                "description": "Destination file path (required for 'render_frame' and 'export').",
+            },
+            "seconds": {
+                "type": "number",
+                "default": 0.0,
+                "description": "Timestamp in seconds for 'render_frame' (default 0.0).",
+            },
+            "start_seconds": {
+                "type": "number",
+                "description": "Optional custom range start time in seconds for 'export'.",
+            },
+            "end_seconds": {
+                "type": "number",
+                "description": "Optional custom range end time in seconds for 'export'.",
+            },
+            "format": {
+                "type": "string",
+                "description": "Optional export format override (e.g. 'h264', 'hevc', 'prores', 'wav', 'mp3').",
+            },
+            "preset": {
+                "type": "string",
+                "description": "Optional FilmCraft export preset name.",
+            },
+            "scale": {
+                "type": "number",
+                "description": "Optional frame scale factor (e.g. 0.5 for half resolution).",
+            },
+            "quality": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 100,
+                "description": "Optional export quality (0..100).",
+            },
+            "no_audio": {
+                "type": "boolean",
+                "default": False,
+                "description": "Omit audio streams when exporting (default false).",
+            },
+            "allow_overwrite": {
+                "type": "boolean",
+                "default": False,
+                "description": "Allow overwriting output_path if it already exists (default false).",
+            },
+            "timeout_s": {
+                "type": "number",
+                "default": 180.0,
+                "description": "Optional execution timeout in seconds (default 180.0).",
+            },
+        },
+        "required": ["action"],
+    },
+}
+
+
 

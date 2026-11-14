@@ -1,39 +1,61 @@
 ---
 name: recipe-dust-scratches
-description: Localized healing recipe preserving nearby edges and authentic texture for dust speckles, hairs, and scratches.
+description: Heal isolated dust specks and scratches without blurring.
+version: "0.1.0"
+author: "wspotter"
+license: "MIT"
+platforms: [linux, macos]
+metadata:
+  hermes:
+    category: creative
+    tags: [artcraft, restoration, spot-healing, retouching, photocraft]
+    related_skills: [photo-restoration, photocraft-cli-edits, photo-inspection]
 ---
 
-# Recipe: Dust and Scratches
+# Recipe: Dust and Scratches Skill
 
-## 1. Recognition
-- **Visual indicators**: High-contrast, sharp-edged isolated blemishes such as dust specks, white hairs, dark negative scratches, or emulsion scuffs.
-- **Distinction**: Distinguish between accidental damage and real scene details:
-  - Scratches cross multiple natural texture boundaries in unnatural straight or curved lines.
-  - Wrinkles, fabric seams, whiskers, wire fences, and background twigs follow scene geometry. Do NOT heal real scene features!
+Remove isolated dust specks, hairs, and emulsion scratches using localized `photocraft_spot_heal` or `artcraft_restore_step` (`recipe="dust_and_scratches"`) while preserving surrounding grain and edge acutance.
 
-## 2. Operation
-- **Localized Spot Healing (Preferred)**:
-  Use `photocraft_spot_heal` or `artcraft_restore_step(recipe="dust_and_scratches", parameters={"points": [...], "size": brush_size}, region=[x, y, w, h])`.
-  - Coordinates must tightly target the defect.
-  - Brush `size`: 1 to 2x defect width (typical: 4 to 24 px).
-  - Non-destructive post-edit check enforces **zero changed pixels outside the target region**.
-- **Filter-based Dust & Scratches (Area approach)**:
-  `photocraft-cli run <in> --cmd filter.noise.dustAndScratches --params '{"radius": 1, "threshold": 15}' --out <out>`
-  - `radius`: 1 to 2 (safe maximum: 3).
-  - `threshold`: 10 to 40 (threshold ensures subtle grain and edges are not blurred).
+## When to Use
 
-## 3. Before/After Comparison
-- **1:1 Native Crops**: Inspect the repaired defect and immediately adjacent textures (hair strands, fabric weave, brick pattern).
-- Verify:
-  - Defect is removed seamlessly without smudging or blurry "mush".
-  - Surrounding grain and edge sharpness match neighboring undamaged areas.
-- **Print-Scale Crops**: Confirm the repair is invisible at normal viewing distance.
+- High-contrast, sharp-edged blemishes or scratches that cut across natural texture boundaries.
+- Defects located away from critical facial identity features or fine lettering.
 
-## 4. Stop Conditions
-- Stop and return `status: "needs_decision"` if:
-  - The defect covers or crosses key facial anatomy (eyes, pupils, lips, teeth) or fine lettering. Healing across missing facial features requires explicit operator decision.
-  - The damaged area is too large for content-aware patch blending without hallucinating content.
+## Prerequisites
 
-## 5. Unsupported CLI Operations
-- Generative AI diffusion inpainting to reconstruct destroyed eyes, smiles, or missing person details.
-- Monolithic full-image blurring filters that obliterate authentic film grain across the whole picture.
+- `photocraft-cli` discoverable via `artcraft_status`.
+- Defect coordinates and bounding `region` `[x, y, width, height]` measured via `artcraft_prepare_inspection`.
+
+## How to Run
+
+### Hermes / MCP Tool (`artcraft_restore_step`)
+
+```json
+{
+  "input_path": "<work_dir>/source/photo.png",
+  "output_path": "<work_dir>/work/step_dust_scratches.png",
+  "recipe": "dust_and_scratches",
+  "parameters": {
+    "points": [[180, 240], [182, 290]],
+    "size": 10
+  },
+  "region": [165, 225, 35, 80],
+  "checkpoint_dir": "<work_dir>/checkpoints",
+  "step_name": "03_dust_scratches"
+}
+```
+
+## Procedure
+
+1. Verify that the mark is an actual scratch or dust speck rather than an authentic scene feature (wires, branches, seams, whiskers, or wrinkles).
+2. Prefer localized spot healing (`photocraft_spot_heal` or `artcraft_restore_step` with `points`, `size` `4..24` px, and tight `region`).
+3. For dense area dust only, use filter parameters `radius` `1..2` (safe max `3`) and `threshold` `10..40` so subtle grain and edges are not blurred.
+
+## Pitfalls
+
+- Stop and return `status: "needs_decision"` if the defect crosses eyes, pupils, lips, teeth, or important lettering, or if the damaged area is too large for patch blending without inventing content.
+- Avoid smeared repairs: `artcraft_build_review` flags repairs where interior pixel variance collapses by more than 80%.
+
+## Verification
+
+- Confirm zero changed pixels outside `region` (`outside_region_changed_pixels == 0`) and inspect 1:1 native crops to verify surrounding texture remains sharp.

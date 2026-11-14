@@ -60,8 +60,11 @@ def _candidate_dirs(extra_dirs: Optional[List[Path]] = None) -> List[Path]:
     if hermes_profile:
         dirs.append(Path.home() / ".hermes" / "profiles" / hermes_profile / "bin")
 
-    # Profile-specific discovery for Printery cluster agents (e.g. Otto profile)
-    dirs.append(Path.home() / ".hermes" / "profiles" / "ottostacy" / "bin")
+    profiles_root = Path.home() / ".hermes" / "profiles"
+    if profiles_root.is_dir():
+        for profile_bin in sorted(profiles_root.glob("*/bin")):
+            if profile_bin not in dirs:
+                dirs.append(profile_bin)
     dirs.append(Path.home() / ".hermes" / "bin")
 
     dirs.extend(_EXTRA_SEARCH_DIRS)

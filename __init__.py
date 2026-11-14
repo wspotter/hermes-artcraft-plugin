@@ -82,6 +82,24 @@ def register(ctx: Any) -> None:
         schema=schemas.ARTCRAFT_JOB,
         handler=tools.artcraft_job,
     )
+    ctx.register_tool(
+        name="artcraft_develop",
+        toolset="artcraft",
+        schema=schemas.ARTCRAFT_DEVELOP,
+        handler=tools.artcraft_develop,
+    )
+    ctx.register_tool(
+        name="artcraft_audio_basic",
+        toolset="artcraft",
+        schema=schemas.ARTCRAFT_AUDIO_BASIC,
+        handler=tools.artcraft_audio_basic,
+    )
+    ctx.register_tool(
+        name="artcraft_video_basic",
+        toolset="artcraft",
+        schema=schemas.ARTCRAFT_VIDEO_BASIC,
+        handler=tools.artcraft_video_basic,
+    )
 
     if hasattr(ctx, "register_cli_command"):
         ctx.register_cli_command(

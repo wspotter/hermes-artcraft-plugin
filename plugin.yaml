@@ -1,6 +1,25 @@
 name: artcraft
-version: 0.1.0
+version: "0.2.0"
 description: "CLI-first tools and automatic post-edit verification for ArtCraft apps (PhotoCraft, LightCraft, FilmCraft, SoundCraft)."
 author: "wspotter"
 license: "MIT"
-toolset: artcraft
+kind: standalone
+platforms:
+  - linux
+  - macos
+provides_tools:
+  - artcraft_status
+  - artcraft_inspect
+  - artcraft_prepare_inspection
+  - artcraft_prepare_print
+  - artcraft_verify_edit
+  - photocraft_run
+  - lightcraft_run
+  - photocraft_spot_heal
+  - artcraft_restore_step
+  - artcraft_checkpoint
+  - artcraft_build_review
+  - artcraft_job
+  - artcraft_develop
+  - artcraft_audio_basic
+  - artcraft_video_basic

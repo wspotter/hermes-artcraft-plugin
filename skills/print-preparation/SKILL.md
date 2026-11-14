@@ -1,102 +1,83 @@
 ---
 name: print-preparation
-description: Recipe for preparing print-ready files at exact dimensions and PPI with aspect ratio validation, clarification gates, color-profile preservation, and delivery file verification.
+description: Format print-ready images with aspect and PPI checks.
+version: "0.1.0"
+author: "wspotter"
+license: "MIT"
+platforms: [linux, macos]
+metadata:
+  hermes:
+    category: creative
+    tags: [artcraft, printing, sizing, color-management, verification]
+    related_skills: [artcraft-router, photo-inspection, recipe-enlargement]
 ---
 
-# Print Preparation Recipe
+# Print Preparation Skill
 
-Preparing a photograph for physical printing requires turning an agreed request into an exact, correctly dimensioned, color-managed delivery file. Proportions must be strictly preserved, aspect ratio conflicts must be resolved before cropping, and the resulting file must be verified by decoding it directly from disk.
+Prepare print-ready delivery files at exact physical dimensions and target PPI using `artcraft_prepare_print` (`hermes artcraft prep-print`). Enforces aspect-ratio clarification gates, preserves 1:1 pixel proportions and ICC color profiles, and verifies the exported file from disk.
 
----
+## When to Use
 
-## 1. Parameters and Calculation
+- Formatting a photograph for physical printing at specific sheet dimensions (`width_in`, `height_in`) and resolution (`ppi`, default 300).
+- Resolving aspect-ratio mismatches between the source image and target print sheet (`margins` vs `borderless` crop).
 
-Every print preparation requires:
-- **Physical dimensions**: `width_in` and `height_in` in inches (e.g., 8×10, 11×14, 5×7).
-- **Target resolution**: `ppi` (default 300 PPI for archival and fine-art printing).
-- **Orientation**: `auto` (aligns image long side with sheet long side), `portrait`, or `landscape`.
-- **Fit mode**:
-  - `borderless` / `crop`: Fills the entire paper with no white borders.
-  - `margins` / `fit`: Preserves the complete photograph without cropping, centering it with margins (`margin_color`, default white).
-- **Output format**: `PNG`, `TIFF`, or `JPEG` (default inferred from file extension).
+## Prerequisites
 
-Target pixel dimensions are calculated as:
-$$\text{width\_px} = \text{round}(\text{width\_in} \times \text{ppi})$$
-$$\text{height\_px} = \text{round}(\text{height\_in} \times \text{ppi})$$
+- Pillow available in the plugin Python environment (`artcraft_status`).
+- Source photograph inspected via `artcraft_inspect` or `artcraft_prepare_inspection`.
 
----
+## How to Run
 
-## 2. The Clarification Gate
+### Hermes / MCP Tool (`artcraft_prepare_print`)
 
-When the source aspect ratio does not match the target print sheet ratio:
-
-1. **If `fit_mode="margins"` / `"fit"` is requested**:
-   The user explicitly requested full-picture preservation with margins. Proceed without clarification.
-
-2. **If `fit_mode="borderless"` / `"crop"` or `"auto"` is requested without `confirm_crop=True`**:
-   **STOP** immediately without writing any output file. Return `status: "needs_clarification"` with the exact parameterized question:
-   > *"Should the photo fill the [sheet] sheet with a [target_ratio] crop, or keep the [source_ratio] crop and add margins?"*
-   >
-   > *(Example: "Should the photo fill the 8×10 sheet with a 4:5 crop, or keep the 3:4 crop and add margins?")*
-
-3. **Wait for confirmation**:
-   Only proceed with borderless cropping when `confirm_crop=True` is explicitly passed.
-
----
-
-## 3. Strict Proportion & Resolution Governance
-
-- **Never stretch or distort**: The pixel aspect ratio must remain 1:1. Resizing must use high-quality Lanczos resampling.
-- **Separate effective source resolution from export resolution**:
-  - `effective_source_ppi`: Measures the physical pixel density of the source data across the printed sheet.
-  - `export_ppi`: The metadata PPI and physical dimensions written to the deliverable file.
-- **Low-resolution warning**: When source pixels are smaller than target print pixels (`effective_source_ppi < ppi`), emit a clear warning. If `allow_upscale=False`, stop and require explicit permission before upscaling.
-
----
-
-## 4. Color Profiles & Master Copy Preservation
-
-- **Color profiles**: Retain embedded ICC color profiles (e.g., sRGB, Adobe RGB, Display P3) through to the export file. If a target ICC profile is specified, apply or embed it cleanly.
-- **Master copy**: When `preserve_master_path` is specified, preserve an untouched copy of the original input file and verify its SHA-256 checksum before performing export edits.
-
----
-
-## 5. Delivery File Verification
-
-Every prepared print file must be verified by reopening and decoding:
-1. Reopen the output file from disk and fully decode its raster data.
-2. Confirm that decoded dimensions match target width and height in pixels.
-3. Confirm that format matches requested format.
-4. Confirm DPI metadata matches requested export PPI.
-5. Confirm embedded ICC profile presence.
-6. Generate a visual composition preview (`max_preview_dimension: 1024`) for visual review before publishing.
-
----
-
-## 6. Tool & CLI Usage
-
-### Hermes Tool
 ```json
 {
-  "name": "artcraft_prepare_print",
-  "arguments": {
-    "input_path": "/path/to/source.png",
-    "output_path": "/path/to/export/print_8x10.png",
-    "width_in": 8.0,
-    "height_in": 10.0,
-    "ppi": 300,
-    "fit_mode": "margins",
-    "margin_color": "white",
-    "preserve_master_path": "/path/to/archive/source_master.png"
-  }
+  "input_path": "<work_dir>/source/photo.png",
+  "output_path": "<work_dir>/exports/print_8x10.png",
+  "width_in": 8.0,
+  "height_in": 10.0,
+  "ppi": 300,
+  "fit_mode": "margins",
+  "margin_color": "white",
+  "preserve_master_path": "<work_dir>/source/photo_master.png"
 }
 ```
 
-### CLI Subcommand
-```bash
-# Print preparation with margins
-hermes artcraft prep-print source.png print_8x10.png --width 8.0 --height 10.0 --fit-mode margins --ppi 300
+### CLI Subcommand (`hermes artcraft prep-print`)
 
-# Borderless with confirmed crop
-hermes artcraft prep-print source.png print_8x10.png --width 8.0 --height 10.0 --fit-mode borderless --confirm-crop --ppi 300
+```bash
+hermes artcraft prep-print <work_dir>/source/photo.png <work_dir>/exports/print_8x10.png \
+  --width 8.0 \
+  --height 10.0 \
+  --fit-mode margins \
+  --ppi 300
+
+hermes artcraft prep-print <work_dir>/source/photo.png <work_dir>/exports/print_8x10_crop.png \
+  --width 8.0 \
+  --height 10.0 \
+  --fit-mode borderless \
+  --confirm-crop \
+  --ppi 300
 ```
+
+## Procedure
+
+1. **Calculate target dimensions**: Target pixel dimensions equal `round(width_in * ppi)` by `round(height_in * ppi)`.
+2. **Enforce the Clarification Gate**:
+   - When `fit_mode` is `"margins"` (or `"fit"`), the full photograph is preserved and centered with margins (`margin_color`).
+   - When the source aspect ratio differs from the sheet ratio and `fit_mode` is `"borderless"` / `"crop"` or `"auto"` without `confirm_crop=true`, `artcraft_prepare_print` stops without writing an output file and returns `status: "needs_clarification"` with the question:
+     *"Should the photo fill the [sheet] sheet with a [target_ratio] crop, or keep the [source_ratio] crop and add margins?"*
+   - Only pass `confirm_crop=true` after the human operator confirms cropping.
+3. **Preserve proportions and color profiles**:
+   - Resizing uses Lanczos resampling with strict 1:1 pixel aspect ratio (never stretch).
+   - Embedded ICC profiles (sRGB, Display P3, Adobe RGB) are retained in the exported deliverable.
+   - Check `effective_source_ppi` vs `export_ppi`; if `effective_source_ppi < ppi` and `allow_upscale=false`, pause for confirmation.
+
+## Pitfalls
+
+- Never pass `confirm_crop=true` on a mismatched aspect ratio unless the user explicitly chose a borderless crop.
+- For intentional manual crops, pass `crop_geometry` to `artcraft_build_review` (`hermes artcraft review --no-preserve-framing --crop-geometry ...`) to review the shaded trim boundary.
+
+## Verification
+
+- `artcraft_prepare_print` reopens and decodes `output_path` from disk, confirming target pixel width and height, file format, DPI metadata, embedded ICC profile presence, unchanged `source_sha256`, and a visual composition preview.

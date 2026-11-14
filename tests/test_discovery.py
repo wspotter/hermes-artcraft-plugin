@@ -61,6 +61,21 @@ class TestDiscovery(unittest.TestCase):
                         found = find_cli_binary("lightcraft")
                         self.assertEqual(found, cli_bin)
 
+    def test_discovers_from_any_hermes_profile_bin_glob(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            fake_home = Path(tmp)
+            profile_bin = fake_home / ".hermes" / "profiles" / "custom_agent" / "bin"
+            profile_bin.mkdir(parents=True)
+            cli_bin = profile_bin / "soundcraft-cli"
+            cli_bin.write_text("#!/bin/sh\necho 'soundcraft-cli 0.20.1'\n", encoding="utf-8")
+            cli_bin.chmod(cli_bin.stat().st_mode | stat.S_IEXEC)
+
+            with patch.object(Path, "home", return_value=fake_home):
+                with patch.dict(os.environ, {"HERMES_PROFILE": "", "HERMES_HOME": "", "ARTCRAFT_BIN_DIR": ""}):
+                    with patch("artcraft_plugin.discovery.shutil.which", return_value=None):
+                        found = find_cli_binary("soundcraft")
+                        self.assertEqual(found, cli_bin)
+
     def test_discover_all_reports_missing_cleanly(self) -> None:
         with patch("artcraft_plugin.discovery.find_cli_binary", return_value=None):
             res = discover_all()

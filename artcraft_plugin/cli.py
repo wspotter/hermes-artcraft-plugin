@@ -21,6 +21,11 @@ from .jobs import (
 from .print_prep import prepare_print
 from .restore import get_checkpoint, list_checkpoints, restore_step
 from .review import build_review_package
+from .suite_basics import (
+    filmcraft_video_basic,
+    lightcraft_develop,
+    soundcraft_audio_basic,
+)
 from .verify import verify_edit
 
 
@@ -236,6 +241,89 @@ def _cmd_job(args: argparse.Namespace) -> int:
         return 1
 
 
+def _parse_kv_pairs(pairs: Any) -> dict:
+    out: dict = {}
+    if not pairs:
+        return out
+    for item in pairs:
+        if "=" not in item:
+            raise ValueError(f"Expected KEY=VALUE, got {item!r}")
+        k, v_raw = item.split("=", 1)
+        try:
+            v = json.loads(v_raw)
+        except Exception:
+            v = v_raw
+        out[k.strip()] = v
+    return out
+
+
+def _cmd_develop(args: argparse.Namespace) -> int:
+    try:
+        sliders = _parse_kv_pairs(getattr(args, "sliders", None))
+        opts = _parse_kv_pairs(getattr(args, "opts", None))
+        res = lightcraft_develop(
+            input_path=args.input_path,
+            output_path=args.output_path,
+            sliders=sliders or None,
+            preset=args.preset,
+            long_edge=args.size,
+            quality=args.quality,
+            export_options=opts or None,
+            allow_overwrite=args.allow_overwrite,
+        )
+        print(json.dumps(res, indent=2))
+        return 0 if res.get("ok") else 1
+    except Exception as exc:
+        print(json.dumps({"ok": False, "app": "lightcraft", "error": str(exc)}, indent=2))
+        return 1
+
+
+def _cmd_audio(args: argparse.Namespace) -> int:
+    try:
+        dither = True if args.dither else (False if args.no_dither else None)
+        res = soundcraft_audio_basic(
+            action=args.action,
+            input_path=args.input_path,
+            output_path=args.output_path,
+            sample_rate=args.rate,
+            bit_depth=args.bit_depth,
+            normalize=args.normalize,
+            dither=dither,
+            allow_overwrite=args.allow_overwrite,
+        )
+        print(json.dumps(res, indent=2))
+        return 0 if res.get("ok") else 1
+    except Exception as exc:
+        print(json.dumps({"ok": False, "app": "soundcraft", "error": str(exc)}, indent=2))
+        return 1
+
+
+def _cmd_video(args: argparse.Namespace) -> int:
+    try:
+        res = filmcraft_video_basic(
+            action=args.action,
+            input_path=args.input_path,
+            project_path=args.project_path,
+            demo=args.demo,
+            output_path=args.output_path,
+            seconds=args.seconds,
+            start_seconds=args.start_seconds,
+            end_seconds=args.end_seconds,
+            format=args.format,
+            preset=args.preset,
+            scale=args.scale,
+            quality=args.quality,
+            no_audio=args.no_audio,
+            allow_overwrite=args.allow_overwrite,
+        )
+        print(json.dumps(res, indent=2))
+        return 0 if res.get("ok") else 1
+    except Exception as exc:
+        print(json.dumps({"ok": False, "app": "filmcraft", "error": str(exc)}, indent=2))
+        return 1
+
+
+
 
 def register_cli(subparser: argparse.ArgumentParser) -> None:
     """Wire `doctor`, `verify`, and `inspect` subcommands onto a parent argparse subparser."""
@@ -377,6 +465,46 @@ def register_cli(subparser: argparse.ArgumentParser) -> None:
     j_status.add_argument("job_id", help="Unique job ID")
     j_status.add_argument("--workspace", default=None, help="Base workspace directory")
     j_status.set_defaults(func=_cmd_job)
+
+    dev_cmd = sub.add_parser("develop", help="Develop and export an image via LightCraft")
+    dev_cmd.add_argument("input_path", help="Source image or raw path")
+    dev_cmd.add_argument("output_path", help="Developed output path")
+    dev_cmd.add_argument("--set", dest="sliders", action="append", default=[], metavar="KEY=VALUE", help="Set develop slider (repeatable)")
+    dev_cmd.add_argument("--preset", default=None, help="Apply preset ID")
+    dev_cmd.add_argument("--size", type=int, default=None, help="Output long edge in pixels")
+    dev_cmd.add_argument("--quality", type=int, default=92, help="Output quality 1..100 (default 92)")
+    dev_cmd.add_argument("--opt", dest="opts", action="append", default=[], metavar="KEY=VALUE", help="Export option (repeatable)")
+    dev_cmd.add_argument("--allow-overwrite", action="store_true", default=False, help="Allow overwriting existing output")
+    dev_cmd.set_defaults(func=_cmd_develop)
+
+    aud_cmd = sub.add_parser("audio", help="Probe or convert/normalize audio via SoundCraft")
+    aud_cmd.add_argument("action", choices=["info", "convert"], help="Audio action")
+    aud_cmd.add_argument("input_path", help="Source audio file path")
+    aud_cmd.add_argument("output_path", nargs="?", default=None, help="Destination audio file path (required for convert)")
+    aud_cmd.add_argument("--rate", type=int, default=None, help="Target sample rate in Hz")
+    aud_cmd.add_argument("--bit-depth", choices=["16", "24", "32f"], default=None, help="Target bit depth")
+    aud_cmd.add_argument("--normalize", action="store_true", default=False, help="Peak-normalize to -0.1 dBFS")
+    aud_cmd.add_argument("--dither", action="store_true", default=False, help="Always dither")
+    aud_cmd.add_argument("--no-dither", action="store_true", default=False, help="Never dither")
+    aud_cmd.add_argument("--allow-overwrite", action="store_true", default=False, help="Allow overwriting existing output")
+    aud_cmd.set_defaults(func=_cmd_audio)
+
+    vid_cmd = sub.add_parser("video", help="Probe media, render frames, or export video via FilmCraft")
+    vid_cmd.add_argument("action", choices=["probe", "render_frame", "export"], help="Video action")
+    vid_cmd.add_argument("--input", dest="input_path", default=None, help="Standalone media clip path")
+    vid_cmd.add_argument("--project", dest="project_path", default=None, help="FilmCraft project (.fcproj) path")
+    vid_cmd.add_argument("--demo", action="store_true", default=False, help="Use built-in demo project")
+    vid_cmd.add_argument("-o", "--output", dest="output_path", default=None, help="Output file path")
+    vid_cmd.add_argument("--seconds", type=float, default=0.0, help="Timestamp in seconds for render_frame")
+    vid_cmd.add_argument("--start", dest="start_seconds", type=float, default=None, help="Custom range start in seconds")
+    vid_cmd.add_argument("--end", dest="end_seconds", type=float, default=None, help="Custom range end in seconds")
+    vid_cmd.add_argument("--format", default=None, help="Export format override")
+    vid_cmd.add_argument("--preset", default=None, help="Export preset name")
+    vid_cmd.add_argument("--scale", type=float, default=None, help="Frame scale factor (e.g. 0.5)")
+    vid_cmd.add_argument("--quality", type=int, default=None, help="Export quality 0..100")
+    vid_cmd.add_argument("--no-audio", action="store_true", default=False, help="Omit audio streams")
+    vid_cmd.add_argument("--allow-overwrite", action="store_true", default=False, help="Allow overwriting existing output")
+    vid_cmd.set_defaults(func=_cmd_video)
 
 
 

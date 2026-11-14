@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "hermes-artcraft-plugin"
-version = "0.1.0"
-description = "Hermes Agent plugin for ArtCraft apps (PhotoCraft, LightCraft) with non-destructive guards and automatic pixel-diff verification."
+version = "0.2.0"
+description = "Hermes Agent plugin for ArtCraft apps (PhotoCraft, LightCraft, FilmCraft, SoundCraft) with non-destructive guards and automatic post-edit verification."
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.11"

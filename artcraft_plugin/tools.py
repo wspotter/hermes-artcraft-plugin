@@ -20,6 +20,11 @@ from .print_prep import prepare_print
 from .restore import get_checkpoint, list_checkpoints, restore_step
 from .review import build_review_package
 from .runner import run_artcraft_cli, spot_heal
+from .suite_basics import (
+    filmcraft_video_basic,
+    lightcraft_develop,
+    soundcraft_audio_basic,
+)
 from .verify import inspect_image, verify_edit
 
 
@@ -346,6 +351,88 @@ def artcraft_job(args: Dict[str, Any], **kwargs: Any) -> str:
 
     except Exception as exc:
         return json.dumps({"ok": False, "error": str(exc)})
+
+
+def artcraft_develop(args: Dict[str, Any], **kwargs: Any) -> str:
+    """Develop an image or raw file via LightCraft non-destructively."""
+    try:
+        input_path = args.get("input_path")
+        output_path = args.get("output_path")
+        if not isinstance(input_path, str) or not input_path.strip():
+            return json.dumps({"ok": False, "app": "lightcraft", "error": "Missing required 'input_path' string"})
+        if not isinstance(output_path, str) or not output_path.strip():
+            return json.dumps({"ok": False, "app": "lightcraft", "error": "Missing required 'output_path' string"})
+
+        res = lightcraft_develop(
+            input_path=input_path,
+            output_path=output_path,
+            sliders=args.get("sliders"),
+            preset=args.get("preset"),
+            long_edge=args.get("long_edge"),
+            quality=int(args.get("quality", 92)),
+            export_options=args.get("export_options"),
+            allow_overwrite=bool(args.get("allow_overwrite", False)),
+            timeout_s=float(args.get("timeout_s", 120.0)),
+        )
+        return json.dumps(res)
+    except Exception as exc:
+        return json.dumps({"ok": False, "app": "lightcraft", "error": str(exc)})
+
+
+def artcraft_audio_basic(args: Dict[str, Any], **kwargs: Any) -> str:
+    """Probe or convert/normalize audio files via SoundCraft non-destructively."""
+    try:
+        action = args.get("action")
+        input_path = args.get("input_path")
+        if not isinstance(action, str) or not action.strip():
+            return json.dumps({"ok": False, "app": "soundcraft", "error": "Missing required 'action' string"})
+        if not isinstance(input_path, str) or not input_path.strip():
+            return json.dumps({"ok": False, "app": "soundcraft", "error": "Missing required 'input_path' string"})
+
+        res = soundcraft_audio_basic(
+            action=action,
+            input_path=input_path,
+            output_path=args.get("output_path"),
+            sample_rate=args.get("sample_rate"),
+            bit_depth=args.get("bit_depth"),
+            normalize=bool(args.get("normalize", False)),
+            dither=args.get("dither"),
+            allow_overwrite=bool(args.get("allow_overwrite", False)),
+            timeout_s=float(args.get("timeout_s", 120.0)),
+        )
+        return json.dumps(res)
+    except Exception as exc:
+        return json.dumps({"ok": False, "app": "soundcraft", "error": str(exc)})
+
+
+def artcraft_video_basic(args: Dict[str, Any], **kwargs: Any) -> str:
+    """Probe media, extract still frames, or export video via FilmCraft non-destructively."""
+    try:
+        action = args.get("action")
+        if not isinstance(action, str) or not action.strip():
+            return json.dumps({"ok": False, "app": "filmcraft", "error": "Missing required 'action' string"})
+
+        res = filmcraft_video_basic(
+            action=action,
+            input_path=args.get("input_path"),
+            project_path=args.get("project_path"),
+            demo=bool(args.get("demo", False)),
+            output_path=args.get("output_path"),
+            seconds=float(args.get("seconds", 0.0)),
+            start_seconds=args.get("start_seconds"),
+            end_seconds=args.get("end_seconds"),
+            format=args.get("format"),
+            preset=args.get("preset"),
+            scale=args.get("scale"),
+            quality=args.get("quality"),
+            no_audio=bool(args.get("no_audio", False)),
+            allow_overwrite=bool(args.get("allow_overwrite", False)),
+            timeout_s=float(args.get("timeout_s", 180.0)),
+        )
+        return json.dumps(res)
+    except Exception as exc:
+        return json.dumps({"ok": False, "app": "filmcraft", "error": str(exc)})
+
 
 
 

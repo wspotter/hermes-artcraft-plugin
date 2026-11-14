@@ -1,39 +1,70 @@
 ---
 name: recipe-faded-tones
-description: Gentle tonal correction recipe preserving highlight and shadow detail for photographs with compressed dynamic range or faded contrast.
+description: Restore compressed tonal range without clipping endpoints.
+version: "0.1.0"
+author: "wspotter"
+license: "MIT"
+platforms: [linux, macos]
+metadata:
+  hermes:
+    category: creative
+    tags: [artcraft, restoration, levels, exposure, photography]
+    related_skills: [photo-restoration, photo-inspection, lightcraft-basics]
 ---
 
-# Recipe: Faded Tones
+# Recipe: Faded Tones Skill
 
-## 1. Recognition
-- **Visual indicators**: Washed-out blacks, milky shadows, flat midtone contrast, or faded aged prints.
-- **Measured clues**:
-  - Minimum luminance well above 0 (e.g. minimum luminance > 25).
-  - Maximum luminance below 240.
-  - Histogram dynamic range compressed into midtones without clipping at ends.
-  - Endpoint clipping clues from `artcraft_prepare_inspection` show 0.0% clipped shadows and 0.0% clipped highlights.
+Restore washed-out blacks, milky shadows, and compressed midtone contrast using `artcraft_restore_step` (`recipe="faded_tones"`) or `artcraft_develop` without crushing shadows or blowing out highlights.
 
-## 2. Operation
-- **CLI Tool**: `photocraft-cli run <in> --cmd image.adjustments.levels --params <JSON> --out <out>`
-- **Safe parameter bounds**:
-  - `in_black`: 5 to 30 (default 12; maximum safe 50).
-  - `in_white`: 225 to 250 (default 242; minimum safe 200).
-  - `gamma`: 0.90 to 1.15 (default 1.05; safe range 0.7 to 1.5).
-  - `out_black`: 0 (standard).
-  - `out_white`: 255 (standard).
-- **Alternative (LightCraft)**:
-  `lightcraft-cli render <in> -o <out> --set light.contrast=15 --set light.shadows=-10 --set light.highlights=5`
+## When to Use
 
-## 3. Before/After Comparison
-- **1:1 Native Crops**: Inspect deep shadow patches and bright cloud/cloth highlights. Verify texture and subtle gradations remain distinct without turning into solid flat blocks of black or white.
-- **Print-Scale Crops**: Verify overall image contrast feels natural at intended viewing scale (e.g. 300 PPI) without excessive harshness.
+- Inspection metrics from `artcraft_prepare_inspection` show elevated minimum luminance (`> 25`), lowered maximum luminance (`< 240`), and `0.0%` highlight/shadow clipping.
 
-## 4. Stop Conditions
-- Stop and return `status: "needs_decision"` if:
-  - Shadows are already clipped in the original and adjusting black point crushes remaining shadow details.
-  - Requested `in_black > 50` or `in_white < 200`.
-  - Contrast adjustment blows out existing highlight headroom.
+## Prerequisites
 
-## 5. Unsupported CLI Operations
-- Monolithic one-button automatic dynamic range flattening that ignores existing intentional fog or lighting atmosphere.
-- Destructive non-linear curve bends that crush delicate shadow detail.
+- `photocraft-cli` or `lightcraft-cli` discoverable via `artcraft_status`.
+- Tonal endpoints inspected via `artcraft_prepare_inspection`.
+
+## How to Run
+
+### Hermes / MCP Tool (`artcraft_restore_step`)
+
+```json
+{
+  "input_path": "<work_dir>/source/photo.png",
+  "output_path": "<work_dir>/work/step_faded_tones.png",
+  "recipe": "faded_tones",
+  "parameters": {
+    "in_black": 12,
+    "in_white": 242,
+    "gamma": 1.05,
+    "out_black": 0,
+    "out_white": 255
+  },
+  "checkpoint_dir": "<work_dir>/checkpoints",
+  "step_name": "01_faded_tones"
+}
+```
+
+### LightCraft Alternative (`artcraft_develop`)
+
+```bash
+hermes artcraft develop <work_dir>/source/photo.png <work_dir>/work/step_faded_tones.png \
+  --set light.contrast=15 \
+  --set light.shadows=-10 \
+  --set light.highlights=5
+```
+
+## Procedure
+
+1. Set `in_black` between `5` and `30` (default `12`, safe maximum `50`).
+2. Set `in_white` between `225` and `250` (default `242`, safe minimum `200`).
+3. Set `gamma` between `0.90` and `1.15` (default `1.05`, safe range `0.7..1.5`).
+
+## Pitfalls
+
+- Stop and return `status: "needs_decision"` if `in_black > 50`, `in_white < 200`, or if the source already exhibits shadow or highlight clipping that would be worsened.
+
+## Verification
+
+- Inspect 1:1 native crops of deep shadows and bright highlights in `checkpoint_dir` to confirm subtle gradations remain distinct.

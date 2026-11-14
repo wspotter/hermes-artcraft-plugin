@@ -1,17 +1,66 @@
 ---
 name: artcraft-router
-description: Route image and photo editing tasks to the right ArtCraft CLI tool and enforce post-edit verification.
+description: Route creative media tasks across the ArtCraft CLI suite.
+version: "0.1.0"
+author: "wspotter"
+license: "MIT"
+platforms: [linux, macos]
+metadata:
+  hermes:
+    category: creative
+    tags: [artcraft, router, photocraft, lightcraft, filmcraft, soundcraft]
+    related_skills:
+      - photo-inspection
+      - photocraft-cli-edits
+      - lightcraft-basics
+      - lightcraft-cli-edits
+      - soundcraft-basics
+      - filmcraft-basics
+      - print-preparation
+      - photo-restoration
 ---
 
-# ArtCraft Router
+# ArtCraft Router Skill
 
-Use ArtCraft's CLI tools instead of GUI clicking whenever possible:
+Route image, photo development, audio, video, restoration, and print-preparation tasks across all four ArtCraft applications (`PhotoCraft`, `LightCraft`, `FilmCraft`, `SoundCraft`) using non-destructive tools and post-edit verification.
 
-1. **Check availability first** with `artcraft_status` if you haven't verified which binaries are installed in this session.
-2. **Inspect the photograph first**: Load the `photo-inspection` skill. Use `artcraft_prepare_inspection` to generate whole-photo previews, 1:1 native crops, print PPI ratings, and measured clues (endpoint clipping, sharpness, noise) without altering the source file. For quick metadata checks, use `artcraft_inspect`.
-3. For a localized blemish or scratch, load `photocraft-cli-edits` and use `photocraft_spot_heal`. Review the changed area before delivery.
-4. For LightCraft discovery, load `lightcraft-cli-edits`. Use `artcraft_verify_edit` to compare compatible raster exports made through your configured workflow.
-5. **Prepare print files**: Load the `print-preparation` skill. Use `artcraft_prepare_print` to calculate dimensions and target PPI, enforce the aspect ratio clarification gate (borderless crop vs margins), preserve color profiles and master copies, and verify the final deliverable.
-6. **Apply restoration recipes**: Load the `photo-restoration` skill (or modular recipe skills `recipe-faded-tones`, `recipe-color-cast`, `recipe-dust-scratches`, `recipe-noise-grain`, `recipe-sharpening`, `recipe-enlargement`). Use `artcraft_restore_step` to execute incremental edits with checkpointing and matching native 1:1 and print-scale before/after crops. Enforce the Stop/Ask Gate (`status: "needs_decision"`) before reconstructing missing faces, lettering, or important missing content. Use `artcraft_checkpoint` to inspect or audit restoration history.
-7. **Build structured review packages**: Use `artcraft_build_review` to generate whole-photo previews, 1:1 native crops, source/output SHA-256 hashes, mechanical checks, and quality-trap flags (untouched scratch / no-op, unauthorized framing or aspect shift, and smeared repairs with variance collapse >80%) with bounded retry tracking.
-8. **Manage job workspaces & delivery receipts**: Use `artcraft_job` to create deterministic job folders (`source/`, `work/`, `previews/`, `exports/`, `job.json`), checkpoint work stages, resume from the last verified checkpoint after interruptions, record verified export artifacts, and reconcile uncertain delivery receipts before retrying to prevent duplicate delivery.
+## When to Use
+
+- Starting any creative media inspection, editing, restoration, development, print formatting, audio conversion, or video export task.
+- Selecting the right ArtCraft tool among the 15 Hermes tools / 13 unified MCP tools.
+
+## Prerequisites
+
+- ArtCraft CLI suite (`photocraft-cli`, `lightcraft-cli`, `filmcraft-cli`, `soundcraft-cli`) discoverable via `artcraft_status`.
+
+## How to Run
+
+Check installed binaries first if not yet verified in the current session:
+
+```bash
+hermes artcraft doctor
+```
+
+Or call `artcraft_status` via tool invocation.
+
+## Procedure
+
+1. **Check availability**: Call `artcraft_status` (or `photocraft_run` / `lightcraft_run` for CLI flag checks) to confirm which ArtCraft binaries are installed.
+2. **Inspect photographs first**: Load `photo-inspection`. Use `artcraft_prepare_inspection` for whole-photo previews, 1:1 native crops, print PPI ratings, and measured clues, or `artcraft_inspect` for quick metadata and SHA-256 checks.
+3. **Heal localized blemishes (`PhotoCraft`)**: Load `photocraft-cli-edits` and call `photocraft_spot_heal` with an explicit bounding `region` `[x, y, width, height]`.
+4. **Develop & tone photographs (`LightCraft`)**: Load `lightcraft-basics` and call `artcraft_develop` (`hermes artcraft develop`) with non-destructive `sliders`, `preset`, `long_edge`, and `quality`.
+5. **Inspect & convert audio (`SoundCraft`)**: Load `soundcraft-basics` and call `artcraft_audio_basic` (`hermes artcraft audio`) with `action="info"` or `action="convert"` (`sample_rate`, `bit_depth`, `normalize`, `dither`).
+6. **Probe, frame-grab & export video (`FilmCraft`)**: Load `filmcraft-basics` and call `artcraft_video_basic` (`hermes artcraft video`) with `action="probe"`, `action="render_frame"`, or `action="export"`.
+7. **Prepare print deliverables**: Load `print-preparation` and call `artcraft_prepare_print` (`hermes artcraft prep-print`) to enforce aspect-ratio clarification gates, target PPI, and color profile preservation.
+8. **Run checkpointed photo restoration**: Load `photo-restoration` (and recipe skills `recipe-faded-tones`, `recipe-color-cast`, `recipe-dust-scratches`, `recipe-noise-grain`, `recipe-sharpening`, `recipe-enlargement`). Use `artcraft_restore_step` and `artcraft_checkpoint`, honoring `status: "needs_decision"` Stop/Ask gates.
+9. **Build reviews & manage jobs**: Use `artcraft_build_review` (`hermes artcraft review`) for quality-trap detection and before/after crop packages, `artcraft_verify_edit` (`hermes artcraft verify`) for pixel-diff bounds checks, and `artcraft_job` (`hermes artcraft job`) for deterministic job folders and delivery receipt reconciliation.
+
+## Pitfalls
+
+- Never mutate source media in-place; every editing tool requires a distinct `output_path` and verifies `source_sha256`.
+- Never bypass `status: "needs_clarification"` (print aspect-ratio gate) or `status: "needs_decision"` (restoration Stop/Ask gate) without human confirmation.
+
+## Verification
+
+- Every write operation returns `source_sha256` and `output_sha256` alongside decoded format/stream verification.
+- Visually inspect generated previews and 1:1 native crops before final delivery.
