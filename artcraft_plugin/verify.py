@@ -66,13 +66,12 @@ def _count_changed_pixels(img_a: Image.Image, img_b: Image.Image) -> int:
     a_rgba = img_a.convert("RGBA")
     b_rgba = img_b.convert("RGBA")
     diff = ImageChops.difference(a_rgba, b_rgba)
-    # Collapse RGBA channels per pixel: any non-zero channel marks the pixel changed.
-    raw = diff.tobytes()
-    changed = 0
-    for idx in range(0, len(raw), 4):
-        if raw[idx] or raw[idx + 1] or raw[idx + 2] or raw[idx + 3]:
-            changed += 1
-    return changed
+    if diff.getbbox(alpha_only=False) is None:
+        return 0
+    r, g, b, a = diff.split()
+    any_nonzero = ImageChops.lighter(ImageChops.lighter(r, g), ImageChops.lighter(b, a))
+    hist = any_nonzero.histogram()
+    return (a_rgba.width * a_rgba.height) - hist[0]
 
 
 def _validate_region(region: Sequence[int], width: int, height: int) -> tuple[int, int, int, int]:
@@ -143,11 +142,12 @@ def verify_edit(
         with Image.open(in_info["path"]) as img_in, Image.open(out_info["path"]) as img_out:
             total_pixels = img_in.width * img_in.height
             changed_pixels = _count_changed_pixels(img_in, img_out)
+            changed_ratio = round(changed_pixels / total_pixels, 6) if total_pixels else 0.0
             pixel_diff.update(
                 {
                     "changed_pixels": changed_pixels,
                     "total_pixels": total_pixels,
-                    "changed_ratio": round(changed_pixels / total_pixels, 6) if total_pixels else 0.0,
+                    "changed_ratio": changed_ratio,
                 }
             )
             if region is not None:

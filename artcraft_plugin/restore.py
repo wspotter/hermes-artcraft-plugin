@@ -3,22 +3,24 @@
 from __future__ import annotations
 
 import datetime
+import fcntl
 import json
 import math
 import os
-import shutil
 import tempfile
-from dataclasses import asdict, dataclass, field
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 
-import numpy as np
-from PIL import Image, ImageChops, ImageDraw, ImageFont, ImageFilter
+from PIL import Image, ImageDraw
 
-from .discovery import find_cli_binary
-from .runner import run_artcraft_cli, spot_heal
-from .verify import _count_changed_pixels, _validate_region, inspect_image, sha256_file
-
+from .runner import (
+    _paths_refer_to_same_file,
+    atomic_replace_file,
+    run_artcraft_cli,
+    spot_heal,
+)
+from .verify import _count_changed_pixels, inspect_image, sha256_file
 
 SUPPORTED_RECIPES = (
     "faded_tones",
@@ -74,17 +76,56 @@ SAFE_BOUNDS: Dict[str, Dict[str, Any]] = {
         "radius_max": 2.2,       # Large radii create broad cartoonish contours
     },
     "enlargement": {
-        "scale_max": 4.0,        # Factor > 4x without AI hallucination loses photographic fidelity
+        "scale_max": 4.0,  # Scaling past 4x without synthesized detail loses fidelity
     },
 }
 
 
-class RestorationError(Exception):
-    """Base exception for restoration failures."""
+def _parse_finite_float(value: Any, name: str) -> float:
+    """Parse a finite numeric parameter, rejecting booleans, None, NaN, and Inf."""
+    if isinstance(value, bool):
+        raise ValueError(f"Parameter '{name}' must be a finite number, got {value!r}")
+    try:
+        num = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"Parameter '{name}' must be a finite number, got {value!r}") from exc
+    if not math.isfinite(num):
+        raise ValueError(f"Parameter '{name}' must be a finite number, got {value!r}")
+    return num
 
 
-class GateDecisionRequired(RestorationError):
-    """Raised when an operation encounters the Stop/Ask gate."""
+def _read_manifest_strict(manifest_path: Path) -> List[Dict[str, Any]]:
+    """Read manifest.json and raise ValueError if existing content is corrupt or not a list."""
+    if not os.path.lexists(manifest_path):
+        return []
+    try:
+        raw = manifest_path.read_text(encoding="utf-8")
+        parsed = json.loads(raw)
+    except Exception as exc:
+        raise ValueError(f"Corrupt checkpoint manifest at {manifest_path}: {exc}") from exc
+    if not isinstance(parsed, list):
+        raise ValueError(f"Corrupt checkpoint manifest at {manifest_path}: expected a JSON list")
+    return parsed
+
+
+def _atomic_write_json(target_path: Path, data: Any) -> None:
+    """Atomically write JSON data to target_path via a same-directory temp file."""
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_name = tempfile.mkstemp(
+        prefix=f".{target_path.name}.",
+        suffix=".tmp",
+        dir=str(target_path.parent),
+    )
+    tmp_path = Path(tmp_name)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            json.dump(data, handle, indent=2)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(str(tmp_path), str(target_path))
+    except Exception:
+        tmp_path.unlink(missing_ok=True)
+        raise
 
 
 def check_stop_ask_gate(
@@ -94,41 +135,39 @@ def check_stop_ask_gate(
     reconstruct_missing: bool = False,
     content_type: Optional[str] = None,
 ) -> Optional[Dict[str, Any]]:
-    """Evaluate whether the request must stop and ask for human operator decision.
+    """Evaluate whether the request requires operator confirmation before proceeding.
 
-    Stops when:
-    1. Reconstructing missing faces, lettering, or important content is requested.
-    2. Generative inpainting or content hallucination is specified.
+    Returns a decision payload when:
+    1. Reconstructing missing faces, lettering, or other content is requested.
+    2. Generative inpainting or synthesized detail is specified.
     3. Parameters exceed safe non-destructive restoration boundaries.
     """
     params = parameters or {}
 
-    # Check explicit reconstruction flags
     if reconstruct_missing:
         return {
             "status": "needs_decision",
             "reason": (
                 "Request involves reconstructing missing photographic content. "
-                "Safe restoration preserves existing photographic material but does "
-                "not invent or hallucinate missing features without operator decision."
+                "Safe restoration preserves existing photographic material and requires "
+                "operator confirmation before generating synthesized detail for missing features."
             ),
             "gate_category": "missing_content_reconstruction",
         }
 
-    # Check content type indicators
     if content_type:
         norm_type = content_type.strip().lower()
         if any(kw in norm_type for kw in ("face", "lettering", "text", "missing", "identity")):
             return {
                 "status": "needs_decision",
                 "reason": (
-                    f"Target content type '{content_type}' involves potential reconstruction of "
-                    "missing facial identity, lettering, or key features. Operator decision required."
+                    f"Target content type '{content_type}' involves potential reconstruction "
+                    "of missing facial identity, lettering, or key features. "
+                    "Operator decision required."
                 ),
                 "gate_category": "missing_content_reconstruction",
             }
 
-    # Check parameter keys and strings for reconstruction requests
     for key, val in params.items():
         key_str = str(key).lower()
         val_str = str(val).lower() if isinstance(val, (str, bool)) else ""
@@ -136,34 +175,60 @@ def check_stop_ask_gate(
             return {
                 "status": "needs_decision",
                 "reason": (
-                    f"Parameter '{key}' specifies reconstruction of missing facial details or text. "
-                    "Operator decision required before altering photographic truth."
+                    f"Parameter '{key}' specifies reconstruction of missing facial details or "
+                    "text. Operator confirmation required before reconstructing missing content."
                 ),
                 "gate_category": "missing_content_reconstruction",
             }
 
     # Check parameter bounds per recipe
     if recipe == "faded_tones":
-        in_black = params.get("in_black", params.get("inBlack", 0))
-        in_white = params.get("in_white", params.get("inWhite", 255))
-        contrast = params.get("contrast", 0)
-        gamma = params.get("gamma", 1.0)
-        if in_black > SAFE_BOUNDS["faded_tones"]["in_black_max"]:
+        in_black = _parse_finite_float(params.get("in_black", params.get("inBlack", 0)), "in_black")
+        in_white = _parse_finite_float(
+            params.get("in_white", params.get("inWhite", 255)),
+            "in_white",
+        )
+        contrast = _parse_finite_float(params.get("contrast", 0), "contrast")
+        gamma = _parse_finite_float(params.get("gamma", 1.0), "gamma")
+        in_black_max = SAFE_BOUNDS["faded_tones"]["in_black_max"]
+        in_white_min = SAFE_BOUNDS["faded_tones"]["in_white_min"]
+        gamma_min = SAFE_BOUNDS["faded_tones"]["gamma_min"]
+        gamma_max = SAFE_BOUNDS["faded_tones"]["gamma_max"]
+        contrast_max = SAFE_BOUNDS["faded_tones"]["contrast_max"]
+
+        if in_black > in_black_max:
             return {
                 "status": "needs_decision",
-                "reason": f"Requested in_black={in_black} exceeds safe limit ({SAFE_BOUNDS['faded_tones']['in_black_max']}), which would crush deep shadow detail.",
+                "reason": (
+                    f"Requested in_black={in_black} exceeds safe limit ({in_black_max}), "
+                    "which would crush deep shadow detail."
+                ),
                 "gate_category": "unsafe_parameters",
             }
-        if in_white < SAFE_BOUNDS["faded_tones"]["in_white_min"]:
+        if in_white < in_white_min:
             return {
                 "status": "needs_decision",
-                "reason": f"Requested in_white={in_white} is below safe limit ({SAFE_BOUNDS['faded_tones']['in_white_min']}), which would blow out delicate highlight detail.",
+                "reason": (
+                    f"Requested in_white={in_white} is below safe limit ({in_white_min}), "
+                    "which would blow out delicate highlight detail."
+                ),
                 "gate_category": "unsafe_parameters",
             }
-        if contrast > SAFE_BOUNDS["faded_tones"]["contrast_max"]:
+        if gamma < gamma_min or gamma > gamma_max:
             return {
                 "status": "needs_decision",
-                "reason": f"Contrast boost={contrast} exceeds safe limit ({SAFE_BOUNDS['faded_tones']['contrast_max']}).",
+                "reason": (
+                    f"Requested gamma={gamma} is outside safe bounds ({gamma_min}..{gamma_max}), "
+                    "risking unnatural midtone contrast."
+                ),
+                "gate_category": "unsafe_parameters",
+            }
+        if contrast > contrast_max:
+            return {
+                "status": "needs_decision",
+                "reason": (
+                    f"Contrast boost={contrast} exceeds safe limit ({contrast_max})."
+                ),
                 "gate_category": "unsafe_parameters",
             }
 
@@ -171,47 +236,85 @@ def check_stop_ask_gate(
         shift_max = SAFE_BOUNDS["color_cast"]["shift_max"]
         midtones = params.get("midtones")
         if isinstance(midtones, (list, tuple)):
-            if any(abs(v) > shift_max for v in midtones if isinstance(v, (int, float))):
+            if any(
+                abs(_parse_finite_float(v, "midtones")) > shift_max
+                for v in midtones
+                if isinstance(v, (int, float)) and not isinstance(v, bool)
+            ):
                 return {
                     "status": "needs_decision",
-                    "reason": f"Color balance shift in midtones {midtones} exceeds safe limit (+/-{shift_max}), risking unnatural skin tones and artifacting.",
+                    "reason": (
+                        f"Color balance shift in midtones {midtones} exceeds safe limit "
+                        f"(+/-{shift_max}), risking unnatural skin tones and artifacting."
+                    ),
                     "gate_category": "unsafe_parameters",
                 }
 
     elif recipe == "noise_and_grain":
-        strength = params.get("strength", 4)
-        preserve_details = params.get("preserve_details", params.get("preserveDetails", 70))
-        if strength > SAFE_BOUNDS["noise_and_grain"]["strength_max"] and preserve_details < SAFE_BOUNDS["noise_and_grain"]["preserve_details_min"]:
+        strength = _parse_finite_float(params.get("strength", 4), "strength")
+        preserve_details = _parse_finite_float(
+            params.get("preserve_details", params.get("preserveDetails", 70)),
+            "preserve_details",
+        )
+        strength_max = SAFE_BOUNDS["noise_and_grain"]["strength_max"]
+        preserve_min = SAFE_BOUNDS["noise_and_grain"]["preserve_details_min"]
+        if strength > strength_max or preserve_details < preserve_min:
             return {
                 "status": "needs_decision",
-                "reason": f"Extreme noise reduction (strength={strength}, preserveDetails={preserve_details}) causes plastic skin texture and obliterates lettering.",
+                "reason": (
+                    f"Extreme noise reduction (strength={strength}, "
+                    f"preserveDetails={preserve_details}) causes plastic skin texture "
+                    "and obliterates lettering."
+                ),
                 "gate_category": "unsafe_parameters",
             }
 
     elif recipe == "sharpening":
-        amount = params.get("amount", 50)
-        radius = params.get("radius", 1.0)
-        if amount > SAFE_BOUNDS["sharpening"]["amount_max"]:
+        amount = _parse_finite_float(params.get("amount", 50), "amount")
+        radius = _parse_finite_float(params.get("radius", 1.0), "radius")
+        amount_max = SAFE_BOUNDS["sharpening"]["amount_max"]
+        radius_max = SAFE_BOUNDS["sharpening"]["radius_max"]
+        if amount > amount_max:
             return {
                 "status": "needs_decision",
-                "reason": f"Sharpening amount={amount} exceeds safe limit ({SAFE_BOUNDS['sharpening']['amount_max']}), producing distracting edge halos.",
+                "reason": (
+                    f"Sharpening amount={amount} exceeds safe limit ({amount_max}), "
+                    "producing distracting edge halos."
+                ),
                 "gate_category": "unsafe_parameters",
             }
-        if radius > SAFE_BOUNDS["sharpening"]["radius_max"]:
+        if radius > radius_max:
             return {
                 "status": "needs_decision",
-                "reason": f"Sharpening radius={radius} exceeds safe limit ({SAFE_BOUNDS['sharpening']['radius_max']}), causing thick border artifacts.",
+                "reason": (
+                    f"Sharpening radius={radius} exceeds safe limit ({radius_max}), "
+                    "causing thick border artifacts."
+                ),
                 "gate_category": "unsafe_parameters",
             }
 
     elif recipe == "enlargement":
         scale = params.get("scale")
-        if scale is not None and float(scale) > SAFE_BOUNDS["enlargement"]["scale_max"]:
-            return {
-                "status": "needs_decision",
-                "reason": f"Enlargement scale={scale} exceeds safe limit ({SAFE_BOUNDS['enlargement']['scale_max']}x). Extreme scaling requires operator review.",
-                "gate_category": "unsafe_parameters",
-            }
+        width = params.get("width")
+        height = params.get("height")
+        if scale is not None:
+            scale_val = _parse_finite_float(scale, "scale")
+            if scale_val <= 0:
+                raise ValueError(f"Enlargement scale must be positive, got {scale!r}")
+            scale_max = SAFE_BOUNDS["enlargement"]["scale_max"]
+            if scale_val > scale_max:
+                return {
+                    "status": "needs_decision",
+                    "reason": (
+                        f"Enlargement scale={scale} exceeds safe limit ({scale_max}x). "
+                        "Extreme scaling requires operator review."
+                    ),
+                    "gate_category": "unsafe_parameters",
+                }
+        if width is not None and _parse_finite_float(width, "width") <= 0:
+            raise ValueError(f"Enlargement width must be positive, got {width!r}")
+        if height is not None and _parse_finite_float(height, "height") <= 0:
+            raise ValueError(f"Enlargement height must be positive, got {height!r}")
 
     return None
 
@@ -275,7 +378,6 @@ def generate_before_after_crops(
     for idx, (x0, y0, x1, y1) in enumerate(crop_boxes):
         prefix = f"crop_{idx + 1:02d}"
 
-        # 1. Native-resolution crop
         before_crop = im_before.crop((x0, y0, x1, y1))
 
         # Matching area in after image (scaled if image was resized/enlarged)
@@ -294,7 +396,7 @@ def generate_before_after_crops(
         after_crop.save(native_after_path, format="PNG")
 
         # Create side-by-side native comparison canvas
-        # If sizes differ due to enlargement, resize before crop visually for side-by-side or match heights
+        # If sizes differ due to enlargement, resize before crop visually or match heights
         norm_h = max(before_crop.height, after_crop.height, 120)
         nb_w = int(round(before_crop.width * (norm_h / before_crop.height)))
         na_w = int(round(after_crop.width * (norm_h / after_crop.height)))
@@ -316,13 +418,17 @@ def generate_before_after_crops(
         native_strip_path = out_dir / f"{prefix}_native_comparison.png"
         native_comp.save(native_strip_path, format="PNG")
 
-        # 2. Print-scale crop (simulated appearance at intended physical print PPI)
+        # Print-scale crop (simulated appearance at intended physical print PPI)
         # At print PPI (e.g. 300), a 1-inch area is target_print_ppi x target_print_ppi pixels.
         # Both crops are shown at the target print viewing scale.
         print_box_size = min(target_print_ppi, before_crop.width, after_crop.width)
         if print_box_size > 0:
-            pb_before = before_crop.resize((print_box_size, print_box_size), Image.Resampling.LANCZOS)
-            pb_after = after_crop.resize((print_box_size, print_box_size), Image.Resampling.LANCZOS)
+            pb_before = before_crop.resize(
+                (print_box_size, print_box_size), Image.Resampling.LANCZOS
+            )
+            pb_after = after_crop.resize(
+                (print_box_size, print_box_size), Image.Resampling.LANCZOS
+            )
         else:
             pb_before = before_crop
             pb_after = after_crop
@@ -336,7 +442,11 @@ def generate_before_after_crops(
         print_strip_h = pb_before.height + 36
         print_comp = Image.new("RGB", (print_strip_w, print_strip_h), (30, 32, 38))
         draw_print = ImageDraw.Draw(print_comp)
-        draw_print.text((8, 10), f"BEFORE (Print Scale @ {target_print_ppi} PPI)", fill=(210, 215, 225))
+        draw_print.text(
+            (8, 10),
+            f"BEFORE (Print Scale @ {target_print_ppi} PPI)",
+            fill=(210, 215, 225),
+        )
         draw_print.text((pb_before.width + 16, 10), f"AFTER ({recipe_name})", fill=(100, 220, 140))
         print_comp.paste(pb_before, (0, 36))
         print_comp.paste(pb_after, (pb_before.width + 12, 36))
@@ -376,16 +486,10 @@ def _record_checkpoint(
     diff_info: Dict[str, Any],
 ) -> Dict[str, Any]:
     """Save step metadata and update manifest.json in the checkpoint directory."""
-    checkpoint_dir.mkdir(parents=True, exist_ok=True)
-    manifest_path = checkpoint_dir / "manifest.json"
-
-    history: List[Dict[str, Any]] = []
-    if manifest_path.exists():
-        try:
-            with manifest_path.open("r", encoding="utf-8") as f:
-                history = json.load(f)
-        except Exception:
-            history = []
+    cdir = Path(checkpoint_dir).expanduser()
+    cdir.mkdir(parents=True, exist_ok=True)
+    manifest_path = cdir / "manifest.json"
+    lock_path = cdir / ".manifest.lock"
 
     checkpoint_record = {
         "step_index": step_index,
@@ -403,15 +507,17 @@ def _record_checkpoint(
         "crops": crops,
     }
 
-    # Write step-specific JSON
-    step_file = checkpoint_dir / f"{step_name}.json"
-    with step_file.open("w", encoding="utf-8") as f:
-        json.dump(checkpoint_record, f, indent=2)
+    step_file = cdir / f"{step_name}.json"
 
-    # Update manifest
-    history.append(checkpoint_record)
-    with manifest_path.open("w", encoding="utf-8") as f:
-        json.dump(history, f, indent=2)
+    with lock_path.open("a+", encoding="utf-8") as lock_file:
+        fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+        try:
+            history = _read_manifest_strict(manifest_path)
+            _atomic_write_json(step_file, checkpoint_record)
+            history.append(checkpoint_record)
+            _atomic_write_json(manifest_path, history)
+        finally:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
 
     return checkpoint_record
 
@@ -429,7 +535,9 @@ def list_checkpoints(checkpoint_dir: Union[str, Path]) -> List[Dict[str, Any]]:
         return []
 
 
-def get_checkpoint(checkpoint_dir: Union[str, Path], step_identifier: Union[int, str]) -> Optional[Dict[str, Any]]:
+def get_checkpoint(
+    checkpoint_dir: Union[str, Path], step_identifier: Union[int, str]
+) -> Optional[Dict[str, Any]]:
     """Get a specific checkpoint by index (1-based) or step name."""
     items = list_checkpoints(checkpoint_dir)
     for it in items:
@@ -438,15 +546,12 @@ def get_checkpoint(checkpoint_dir: Union[str, Path], step_identifier: Union[int,
     return None
 
 
-# =============================================================================
-# RECIPE IMPLEMENTATIONS
-# =============================================================================
-
 def apply_faded_tones(
     input_path: Union[str, Path],
     output_path: Union[str, Path],
     parameters: Optional[Dict[str, Any]] = None,
     *,
+    allow_overwrite: bool = False,
     timeout_s: float = 120.0,
 ) -> Dict[str, Any]:
     """Gentle tonal correction preserving highlight and shadow detail.
@@ -468,9 +573,19 @@ def apply_faded_tones(
 
     result = run_artcraft_cli(
         "photocraft",
-        ["run", str(input_path), "--cmd", "image.adjustments.levels", "--params", json.dumps(cli_params), "--out", str(output_path)],
+        [
+            "run",
+            str(input_path),
+            "--cmd",
+            "image.adjustments.levels",
+            "--params",
+            json.dumps(cli_params),
+            "--out",
+            str(output_path),
+        ],
         input_path=str(input_path),
         output_path=str(output_path),
+        allow_overwrite=allow_overwrite,
         timeout_s=timeout_s,
     )
     return result
@@ -481,6 +596,7 @@ def apply_color_cast(
     output_path: Union[str, Path],
     parameters: Optional[Dict[str, Any]] = None,
     *,
+    allow_overwrite: bool = False,
     timeout_s: float = 120.0,
 ) -> Dict[str, Any]:
     """Neutral-balance and color adjustment preserving believable skin tones and warmth.
@@ -503,9 +619,19 @@ def apply_color_cast(
 
     result = run_artcraft_cli(
         "photocraft",
-        ["run", str(input_path), "--cmd", "image.adjustments.colorBalance", "--params", json.dumps(cli_params), "--out", str(output_path)],
+        [
+            "run",
+            str(input_path),
+            "--cmd",
+            "image.adjustments.colorBalance",
+            "--params",
+            json.dumps(cli_params),
+            "--out",
+            str(output_path),
+        ],
         input_path=str(input_path),
         output_path=str(output_path),
+        allow_overwrite=allow_overwrite,
         timeout_s=timeout_s,
     )
     return result
@@ -517,6 +643,7 @@ def apply_dust_and_scratches(
     parameters: Optional[Dict[str, Any]] = None,
     *,
     region: Optional[Sequence[int]] = None,
+    allow_overwrite: bool = False,
     timeout_s: float = 120.0,
 ) -> Dict[str, Any]:
     """Localized healing of dust speckles and scratches preserving nearby edges.
@@ -546,9 +673,19 @@ def apply_dust_and_scratches(
 
     result = run_artcraft_cli(
         "photocraft",
-        ["run", str(input_path), "--cmd", "filter.noise.dustAndScratches", "--params", json.dumps(cli_params), "--out", str(output_path)],
+        [
+            "run",
+            str(input_path),
+            "--cmd",
+            "filter.noise.dustAndScratches",
+            "--params",
+            json.dumps(cli_params),
+            "--out",
+            str(output_path),
+        ],
         input_path=str(input_path),
         output_path=str(output_path),
+        allow_overwrite=allow_overwrite,
         timeout_s=timeout_s,
     )
     return result
@@ -559,6 +696,7 @@ def apply_noise_and_grain(
     output_path: Union[str, Path],
     parameters: Optional[Dict[str, Any]] = None,
     *,
+    allow_overwrite: bool = False,
     timeout_s: float = 120.0,
 ) -> Dict[str, Any]:
     """Selective noise reduction retaining facial detail, lettering, and texture.
@@ -582,9 +720,19 @@ def apply_noise_and_grain(
 
     result = run_artcraft_cli(
         "photocraft",
-        ["run", str(input_path), "--cmd", "filter.noise.reduceNoise", "--params", json.dumps(cli_params), "--out", str(output_path)],
+        [
+            "run",
+            str(input_path),
+            "--cmd",
+            "filter.noise.reduceNoise",
+            "--params",
+            json.dumps(cli_params),
+            "--out",
+            str(output_path),
+        ],
         input_path=str(input_path),
         output_path=str(output_path),
+        allow_overwrite=allow_overwrite,
         timeout_s=timeout_s,
     )
     return result
@@ -595,6 +743,7 @@ def apply_sharpening(
     output_path: Union[str, Path],
     parameters: Optional[Dict[str, Any]] = None,
     *,
+    allow_overwrite: bool = False,
     timeout_s: float = 120.0,
 ) -> Dict[str, Any]:
     """Restrained sharpening avoiding distracting halos and artifacts.
@@ -614,9 +763,19 @@ def apply_sharpening(
 
     result = run_artcraft_cli(
         "photocraft",
-        ["run", str(input_path), "--cmd", "filter.sharpen.unsharpMask", "--params", json.dumps(cli_params), "--out", str(output_path)],
+        [
+            "run",
+            str(input_path),
+            "--cmd",
+            "filter.sharpen.unsharpMask",
+            "--params",
+            json.dumps(cli_params),
+            "--out",
+            str(output_path),
+        ],
         input_path=str(input_path),
         output_path=str(output_path),
+        allow_overwrite=allow_overwrite,
         timeout_s=timeout_s,
     )
     return result
@@ -627,13 +786,26 @@ def apply_enlargement(
     output_path: Union[str, Path],
     parameters: Optional[Dict[str, Any]] = None,
     *,
+    allow_overwrite: bool = False,
     timeout_s: float = 120.0,
 ) -> Dict[str, Any]:
     """Proportional enlargement + restrained output sharpening preserving composition.
 
-    Chains PhotoCraft's `image.imageSize` (resample=preserveDetails) and `filter.sharpen.unsharpMask`.
+    Chains PhotoCraft's `image.imageSize` (resample=preserveDetails) and
+    `filter.sharpen.unsharpMask`.
     """
     params = parameters or {}
+    scale = params.get("scale")
+    width_param = params.get("width")
+    height_param = params.get("height")
+
+    if scale is not None and _parse_finite_float(scale, "scale") <= 0:
+        raise ValueError(f"Enlargement scale must be positive, got {scale!r}")
+    if width_param is not None and _parse_finite_float(width_param, "width") <= 0:
+        raise ValueError(f"Enlargement width must be positive, got {width_param!r}")
+    if height_param is not None and _parse_finite_float(height_param, "height") <= 0:
+        raise ValueError(f"Enlargement height must be positive, got {height_param!r}")
+
     info = inspect_image(str(input_path))
     if not info.get("valid"):
         raise ValueError("input_path must be a valid image")
@@ -641,18 +813,20 @@ def apply_enlargement(
     orig_w = info["width"]
     orig_h = info["height"]
 
-    scale = params.get("scale")
-    target_w = params.get("width")
-    target_h = params.get("height")
-
     if scale is not None:
-        target_w = int(round(orig_w * float(scale)))
-        target_h = int(round(orig_h * float(scale)))
-    elif target_w is not None and target_h is None:
-        target_h = int(round(orig_h * (target_w / orig_w)))
-    elif target_h is not None and target_w is None:
-        target_w = int(round(orig_w * (target_h / orig_h)))
-    elif target_w is None and target_h is None:
+        scale_f = _parse_finite_float(scale, "scale")
+        target_w = max(1, int(round(orig_w * scale_f)))
+        target_h = max(1, int(round(orig_h * scale_f)))
+    elif width_param is not None and height_param is None:
+        target_w = max(1, int(round(_parse_finite_float(width_param, "width"))))
+        target_h = max(1, int(round(orig_h * (target_w / orig_w))))
+    elif height_param is not None and width_param is None:
+        target_h = max(1, int(round(_parse_finite_float(height_param, "height"))))
+        target_w = max(1, int(round(orig_w * (target_h / orig_h))))
+    elif width_param is not None and height_param is not None:
+        target_w = max(1, int(round(_parse_finite_float(width_param, "width"))))
+        target_h = max(1, int(round(_parse_finite_float(height_param, "height"))))
+    else:
         # Default 1.5x upscaling if not specified
         target_w = int(round(orig_w * 1.5))
         target_h = int(round(orig_h * 1.5))
@@ -676,14 +850,11 @@ def apply_enlargement(
         output_path=str(output_path),
         expected_width=target_w,
         expected_height=target_h,
+        allow_overwrite=allow_overwrite,
         timeout_s=timeout_s,
     )
     return result
 
-
-# =============================================================================
-# RESTORATION STEP ORCHESTRATION & GATE
-# =============================================================================
 
 def restore_step(
     input_path: Union[str, Path],
@@ -703,11 +874,11 @@ def restore_step(
 ) -> Dict[str, Any]:
     """Execute a single verified restoration step with checkpointing and crop comparisons.
 
-    Enforces the Stop/Ask Gate for missing face/lettering/content reconstruction
+    Enforces the confirmation gate for missing face/lettering/content reconstruction
     and unsafe parameter bounds.
     """
     in_path = Path(input_path).expanduser().resolve()
-    out_path = Path(output_path).expanduser().absolute()
+    out_path = Path(os.path.abspath(Path(output_path).expanduser()))
     params = parameters or {}
 
     # Check input file existence and validity
@@ -726,15 +897,15 @@ def restore_step(
             "error": f"input_path is not a readable image: {in_info.get('error')}",
         }
 
-    # Non-destructive safety checks
-    if in_path == out_path:
+    # Non-destructive safety checks before creating any directories
+    if _paths_refer_to_same_file(in_path, out_path):
         return {
             "ok": False,
             "status": "error",
             "error": "output_path must be distinct from input_path to preserve source",
         }
 
-    if out_path.exists() and not allow_overwrite:
+    if os.path.lexists(out_path) and not allow_overwrite:
         return {
             "ok": False,
             "status": "error",
@@ -750,15 +921,22 @@ def restore_step(
             "unsupported_operations": list(UNSUPPORTED_OPERATIONS),
         }
 
-    # 1. EVALUATE STOP / ASK GATE BEFORE ANY WORK
-    gate_decision = check_stop_ask_gate(
-        norm_recipe,
-        params,
-        reconstruct_missing=reconstruct_missing,
-        content_type=content_type,
-    )
+    # Evaluate the confirmation gate before touching files
+    try:
+        gate_decision = check_stop_ask_gate(
+            norm_recipe,
+            params,
+            reconstruct_missing=reconstruct_missing,
+            content_type=content_type,
+        )
+    except ValueError as exc:
+        return {
+            "ok": False,
+            "status": "error",
+            "error": str(exc),
+        }
+
     if gate_decision is not None:
-        # Crucial: DO NOT MUTATE SOURCE OR WRITE OUTPUT FILE
         return {
             "ok": False,
             "status": "needs_decision",
@@ -772,58 +950,66 @@ def restore_step(
             "checkpoint": None,
         }
 
-    # Setup checkpoint paths
+    # Setup checkpoint paths after all guards and gates pass
     cdir = Path(checkpoint_dir).expanduser() if checkpoint_dir else out_path.parent / "checkpoints"
-    cdir.mkdir(parents=True, exist_ok=True)
-
-    manifest = list_checkpoints(cdir)
+    manifest = _read_manifest_strict(cdir / "manifest.json")
     step_idx = len(manifest) + 1
     s_name = step_name or f"step_{step_idx:03d}_{norm_recipe}"
     crops_dir = cdir / f"{s_name}_crops"
 
-    # 2. DISPATCH RECIPE EXECUTION
-    try:
-        if norm_recipe == "faded_tones":
-            exec_res = apply_faded_tones(in_path, out_path, params, timeout_s=timeout_s)
-        elif norm_recipe == "color_cast":
-            exec_res = apply_color_cast(in_path, out_path, params, timeout_s=timeout_s)
-        elif norm_recipe == "dust_and_scratches":
-            exec_res = apply_dust_and_scratches(in_path, out_path, params, region=region, timeout_s=timeout_s)
-        elif norm_recipe == "noise_and_grain":
-            exec_res = apply_noise_and_grain(in_path, out_path, params, timeout_s=timeout_s)
-        elif norm_recipe == "sharpening":
-            exec_res = apply_sharpening(in_path, out_path, params, timeout_s=timeout_s)
-        elif norm_recipe == "enlargement":
-            exec_res = apply_enlargement(in_path, out_path, params, timeout_s=timeout_s)
-        else:
-            raise ValueError(f"Unknown recipe {norm_recipe}")
-    except Exception as exc:
-        return {
-            "ok": False,
-            "status": "error",
-            "error": f"Recipe execution failed: {exc}",
-        }
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    cdir.mkdir(parents=True, exist_ok=True)
 
-    if not exec_res.get("ok"):
-        return {
-            "ok": False,
-            "status": "error",
-            "error": exec_res.get("error", "CLI execution returned failure"),
-            "stderr": exec_res.get("stderr"),
-        }
+    # Render into a temporary file inside out_path.parent and promote atomically
+    suffix = out_path.suffix or ".png"
+    with TemporaryDirectory(prefix=".artcraft-restore-", dir=out_path.parent) as tmp_dir:
+        tmp_out = Path(tmp_dir) / f"restored{suffix}"
+        try:
+            if norm_recipe == "faded_tones":
+                exec_res = apply_faded_tones(in_path, tmp_out, params, timeout_s=timeout_s)
+            elif norm_recipe == "color_cast":
+                exec_res = apply_color_cast(in_path, tmp_out, params, timeout_s=timeout_s)
+            elif norm_recipe == "dust_and_scratches":
+                exec_res = apply_dust_and_scratches(
+                    in_path, tmp_out, params, region=region, timeout_s=timeout_s
+                )
+            elif norm_recipe == "noise_and_grain":
+                exec_res = apply_noise_and_grain(in_path, tmp_out, params, timeout_s=timeout_s)
+            elif norm_recipe == "sharpening":
+                exec_res = apply_sharpening(in_path, tmp_out, params, timeout_s=timeout_s)
+            elif norm_recipe == "enlargement":
+                exec_res = apply_enlargement(in_path, tmp_out, params, timeout_s=timeout_s)
+            else:
+                raise ValueError(f"Unknown recipe {norm_recipe}")
+        except Exception as exc:
+            return {
+                "ok": False,
+                "status": "error",
+                "error": f"Recipe execution failed: {exc}",
+            }
 
-    # Verify output file
+        if not exec_res.get("ok"):
+            return {
+                "ok": False,
+                "status": "error",
+                "error": exec_res.get("error", "CLI execution returned failure"),
+                "stderr": exec_res.get("stderr"),
+            }
+
+        out_info = inspect_image(str(tmp_out))
+        if not out_info.get("valid"):
+            return {
+                "ok": False,
+                "status": "error",
+                "error": f"Generated output is not a valid image: {out_info.get('error')}",
+            }
+
+        if sha256_file(in_path) != in_info["sha256"]:
+            raise ValueError("Source file was modified during restoration step!")
+
+        atomic_replace_file(tmp_out, out_path, allow_overwrite=allow_overwrite)
+
     out_info = inspect_image(str(out_path))
-    if not out_info.get("valid"):
-        return {
-            "ok": False,
-            "status": "error",
-            "error": f"Generated output is not a valid image: {out_info.get('error')}",
-        }
-
-    # Verify source was untouched
-    if sha256_file(in_path) != in_info["sha256"]:
-        raise ValueError("Source file was modified during restoration step!")
 
     # Calculate diff stats
     diff_info: Dict[str, Any] = {}
@@ -846,7 +1032,7 @@ def restore_step(
             ],
         }
 
-    # 3. GENERATE NATIVE AND PRINT-SCALE CROPS FOR VISUAL INSPECTION
+    # Generate native and print-scale comparison crops
     effective_regions = list(crop_regions) if crop_regions else []
     if region and not effective_regions:
         effective_regions.append(list(region))
@@ -860,7 +1046,6 @@ def restore_step(
         target_print_ppi=target_print_ppi,
     )
 
-    # 4. SAVE CHECKPOINT RECORD
     checkpoint_record = _record_checkpoint(
         cdir,
         step_index=step_idx,

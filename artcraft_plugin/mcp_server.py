@@ -1,9 +1,7 @@
-"""Standard I/O Model Context Protocol (MCP) server for ArtCraft tools.
+"""Stdio Model Context Protocol (MCP) server for ArtCraft tools.
 
-Lightweight, zero-extra-dependency JSON-RPC 2.0 stdio server enabling
-MCP clients to access ArtCraft image inspection, print preparation,
-verified spot-healing, step checkpoints, review packages, job workspaces,
-and non-destructive basics across PhotoCraft, LightCraft, FilmCraft, and SoundCraft.
+Zero-dependency JSON-RPC 2.0 server exposing ArtCraft image, audio, video,
+print preparation, review, and job workspace tools over stdin/stdout.
 """
 
 from __future__ import annotations
@@ -13,6 +11,8 @@ import sys
 from typing import Any, BinaryIO, Callable, Dict, Optional
 
 from . import schemas, tools
+
+MAX_MESSAGE_BYTES = 10 * 1024 * 1024  # 10 MiB
 
 # Registry of tools exposed over MCP
 EXPOSED_TOOLS: Dict[str, Dict[str, Any]] = {
@@ -72,7 +72,7 @@ EXPOSED_TOOLS: Dict[str, Dict[str, Any]] = {
 
 
 def read_message(stream: BinaryIO = sys.stdin.buffer) -> Optional[Dict[str, Any]]:
-    """Read a JSON-RPC message from stream supporting newline-delimited or Content-Length framing."""
+    """Read a JSON-RPC message supporting newline-delimited or Content-Length framing."""
     line = stream.readline(1_000_000)
     if not line:
         return None
@@ -92,12 +92,16 @@ def read_message(stream: BinaryIO = sys.stdin.buffer) -> Optional[Dict[str, Any]
         try:
             parts = line_stripped.split(b":", 1)
             length = int(parts[1].strip())
+            if length <= 0 or length > MAX_MESSAGE_BYTES:
+                return None
             # Consume any trailing header lines until blank line
             while True:
                 hdr = stream.readline(10_000)
                 if not hdr or hdr in (b"\r\n", b"\n", b""):
                     break
             body = stream.read(length)
+            if len(body) != length:
+                return None
             val = json.loads(body.decode("utf-8"))
             return val if isinstance(val, dict) else None
         except Exception:
@@ -153,7 +157,8 @@ def process_message(message: Dict[str, Any]) -> Optional[Dict[str, Any]]:
 
     method = message.get("method")
     request_id = message.get("id")
-    params = message.get("params") or {}
+    raw_params = message.get("params")
+    params = {} if raw_params is None else raw_params
 
     # Notifications do not return a response
     if method == "notifications/initialized" or (method and request_id is None):
@@ -206,8 +211,27 @@ def process_message(message: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         }
 
     if method == "tools/call":
+        if not isinstance(params, dict):
+            return {
+                "jsonrpc": "2.0",
+                "id": request_id,
+                "error": {
+                    "code": -32602,
+                    "message": "Invalid params: expected JSON object",
+                },
+            }
         tool_name = params.get("name")
-        arguments = params.get("arguments") or {}
+        raw_args = params.get("arguments")
+        if raw_args is not None and not isinstance(raw_args, dict):
+            return {
+                "jsonrpc": "2.0",
+                "id": request_id,
+                "error": {
+                    "code": -32602,
+                    "message": "Invalid params: 'arguments' must be a JSON object",
+                },
+            }
+        arguments = raw_args or {}
 
         if tool_name not in EXPOSED_TOOLS:
             return {
@@ -260,13 +284,14 @@ def process_message(message: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     return None
 
 
-def run_server(in_stream: BinaryIO = sys.stdin.buffer, out_stream: BinaryIO = sys.stdout.buffer) -> None:
+def run_server(
+    in_stream: BinaryIO = sys.stdin.buffer,
+    out_stream: BinaryIO = sys.stdout.buffer,
+) -> None:
     """Run the stdio message processing loop until EOF."""
     while True:
         msg = read_message(in_stream)
         if msg is None:
-            # Check if end of stream reached
-            # In BinaryIO, read of 0 bytes or empty indicates EOF
             break
         resp = process_message(msg)
         if resp is not None:

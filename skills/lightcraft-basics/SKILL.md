@@ -12,15 +12,15 @@ metadata:
     related_skills: [artcraft-router, photo-inspection, lightcraft-cli-edits]
 ---
 
-# LightCraft Basics Skill
+# LightCraft Basics
 
-Develop and render photographs non-destructively with `artcraft_develop` (`lightcraft-cli render`). Every operation writes to a fresh output path, verifies that the source SHA-256 hash is unchanged, and decodes the rendered image to confirm valid dimensions.
+Develop and render photographs without altering source files using `artcraft_develop` (`lightcraft-cli render`). Each run writes to a fresh output path, checks that `source_sha256` is unchanged, and decodes the output image to confirm valid dimensions.
 
 ## When to Use
 
 - Adjusting exposure, contrast, highlights, shadows, white balance, vibrance, or sharpening across a whole photograph.
-- Applying a named LightCraft preset (`--preset`) or exporting a resized web/review derivative (`long_edge`, `quality`).
-- Rendering RAW or raster inputs to a clean PNG, JPEG, or TIFF deliverable without modifying the source file.
+- Applying a named LightCraft preset (`preset`) or exporting a resized web/review copy (`long_edge`, `quality`).
+- Rendering RAW or raster inputs to PNG, JPEG, or TIFF without touching the original file.
 
 ## Prerequisites
 
@@ -65,17 +65,17 @@ hermes artcraft develop <work_dir>/source/photo.png <work_dir>/work/photo_develo
 
 ## Procedure
 
-1. Run `artcraft_status` if CLI availability has not been verified in the current session.
+1. Run `artcraft_status` if CLI availability has not been checked in the current session.
 2. Call `artcraft_inspect` or `artcraft_prepare_inspection` on `input_path` to check tonal clipping, resolution, and color profile.
 3. Call `artcraft_develop` with a new `output_path` and restrained `sliders` (such as `light.exposure`, `light.contrast`, `color.temp`, `color.vibrance`, `detail.sharpening`), optional `preset`, `long_edge`, and `quality`.
-4. Inspect the returned receipt (`source_sha256`, `output_sha256`, `width`, `height`, `format`) and review the rendered output visually before delivery.
+4. Check the returned JSON (`source_sha256`, `output_sha256`, `width`, `height`, `format`) and inspect the rendered image visually before delivering.
 
 ## Pitfalls
 
-- Never pass `output_path` equal to `input_path`; `artcraft_develop` refuses in-place overwrites to protect source integrity.
-- Avoid extreme slider values that clip highlights or crush shadow gradations; inspect histograms and measured clues when adjusting exposure or contrast.
+- Never pass `output_path` equal to `input_path`; `artcraft_develop` rejects in-place overwrites.
+- Avoid pushing exposure or contrast so far that highlights clip or shadow gradations collapse; check clipping stats after inspection.
 
 ## Verification
 
-- `artcraft_develop` automatically verifies that `source_sha256` is unchanged before and after execution and that the output image decodes cleanly with non-zero width and height.
+- `artcraft_develop` verifies that `source_sha256` matches before and after rendering and confirms the output decodes with non-zero `width` and `height`.
 - For same-dimension raster exports, run `artcraft_verify_edit` or `artcraft_build_review` to compare before and after images.

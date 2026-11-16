@@ -1,8 +1,8 @@
-"""Photograph inspection helpers for ArtCraft plugin.
+"""Image inspection helpers for the ArtCraft plugin.
 
-Generates whole-photo previews, native-resolution crops, orientation and
-color-profile metadata, effective print PPI calculations, and measured clues
-(endpoint clipping, sharpness, noise) with explicit measurement limits.
+Generates previews, 1:1 native crops, orientation and ICC profile metadata,
+effective print PPI tables, and image measurements (clipping, sharpness,
+noise) paired with interpretation limits.
 """
 
 from __future__ import annotations
@@ -15,12 +15,12 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from PIL import Image, ImageCms, ImageFilter, ImageStat
 
+from .verify import sha256_file
+
 try:
     import numpy as np
 except ImportError:
     np = None
-
-from .verify import sha256_file
 
 
 MEASUREMENT_LIMITS: List[str] = [
@@ -164,7 +164,7 @@ def compute_effective_ppi(
     results = []
 
     for name, dim_a, dim_b in targets:
-        # Orient target paper to match image orientation
+        # Match sheet orientation to source image orientation
         if is_landscape:
             target_w = max(dim_a, dim_b)
             target_h = min(dim_a, dim_b)
@@ -175,26 +175,24 @@ def compute_effective_ppi(
         ppi_w = width / target_w
         ppi_h = height / target_h
 
-        # fill_ppi: image must cover whole sheet, limiting dimension determines ppi
+        # Borderless fill covers the entire sheet; limiting edge sets PPI.
         fill_ppi = round(min(ppi_w, ppi_h), 1)
-        # fit_ppi: entire image fits inside sheet with margins
         fit_ppi = round(max(ppi_w, ppi_h), 1)
 
         aspect_target = round(target_w / target_h, 4)
         aspect_img = round(width / height, 4) if height else 0.0
         aspect_match = abs(aspect_target - aspect_img) < 0.01
 
-        # Rating tier based on fill_ppi
         if fill_ppi >= 300.0:
-            rating = "Optimal (300+ PPI - archival / fine-art print)"
+            rating = "Optimal (300+ PPI)"
         elif fill_ppi >= 240.0:
-            rating = "Very Good (240-299 PPI - sharp commercial print)"
+            rating = "Very Good (240-299 PPI)"
         elif fill_ppi >= 180.0:
-            rating = "Good (180-239 PPI - standard photo print)"
+            rating = "Good (180-239 PPI)"
         elif fill_ppi >= 150.0:
-            rating = "Acceptable (150-179 PPI - normal viewing distance)"
+            rating = "Acceptable (150-179 PPI)"
         else:
-            rating = "Low (<150 PPI - pixelation risk, enlargement advised)"
+            rating = "Low (<150 PPI)"
 
         results.append(
             {
@@ -211,12 +209,48 @@ def compute_effective_ppi(
     return results
 
 
-def compute_measured_clues(img: Image.Image) -> Dict[str, Any]:
-    """Compute measured clues: endpoint clipping, dynamic range, sharpness, and noise.
+def compute_laplacian(gray_arr_or_img: Any) -> Any:
+    """Return the 5-point discrete Laplacian array for a 2D luminance array or PIL image."""
+    if np is None:
+        return None
+    if isinstance(gray_arr_or_img, Image.Image):
+        l_img = gray_arr_or_img if gray_arr_or_img.mode == "L" else gray_arr_or_img.convert("L")
+        arr = np.asarray(l_img, dtype=np.float64)
+    else:
+        arr = np.asarray(gray_arr_or_img, dtype=np.float64)
+    if arr.ndim != 2 or arr.shape[0] < 3 or arr.shape[1] < 3:
+        return None
+    return (
+        arr[:-2, 1:-1]
+        + arr[2:, 1:-1]
+        + arr[1:-1, :-2]
+        + arr[1:-1, 2:]
+        - 4.0 * arr[1:-1, 1:-1]
+    )
 
-    Always pairs numbers with explicit measurement limits noting what the
-    measurements can and cannot establish.
-    """
+
+def compute_laplacian_variance(gray_arr_or_img: Any) -> float:
+    """Return Laplacian edge variance as a sharpness proxy (0.0 if smaller than 3x3)."""
+    if np is None:
+        if isinstance(gray_arr_or_img, Image.Image):
+            l_img = (
+                gray_arr_or_img
+                if gray_arr_or_img.mode == "L"
+                else gray_arr_or_img.convert("L")
+            )
+            if l_img.width < 3 or l_img.height < 3:
+                return 0.0
+            edges = l_img.filter(ImageFilter.FIND_EDGES)
+            return float(ImageStat.Stat(edges).var[0])
+        return 0.0
+    lap = compute_laplacian(gray_arr_or_img)
+    if lap is None or lap.size == 0:
+        return 0.0
+    return float(lap.var())
+
+
+def compute_measured_clues(img: Image.Image) -> Dict[str, Any]:
+    """Compute endpoint clipping, dynamic range, sharpness, and noise metrics."""
     width, height = img.width, img.height
     total_pixels = width * height
     if total_pixels == 0:
@@ -225,16 +259,13 @@ def compute_measured_clues(img: Image.Image) -> Dict[str, Any]:
             "measurement_limits": MEASUREMENT_LIMITS,
         }
 
-    # Convert to RGB for uniform channel analysis
     rgb = img.convert("RGB")
 
     if np is not None:
         arr = np.array(rgb)
-        # Pure endpoint clipping (all channels simultaneously at limit)
         shadow_clipped_pixels = int(np.all(arr == 0, axis=-1).sum())
         highlight_clipped_pixels = int(np.all(arr == 255, axis=-1).sum())
 
-        # Per-channel clipping
         r_chan = arr[..., 0]
         g_chan = arr[..., 1]
         b_chan = arr[..., 2]
@@ -246,35 +277,26 @@ def compute_measured_clues(img: Image.Image) -> Dict[str, Any]:
         b_zero = int((b_chan == 0).sum())
         b_255 = int((b_chan == 255).sum())
 
-        # Grayscale luminance using ITU-R 601-2 luma weights
-        gray = r_chan.astype(float) * 0.299 + g_chan.astype(float) * 0.587 + b_chan.astype(float) * 0.114
+        # ITU-R 601-2 luma weights
+        gray = (
+            r_chan.astype(float) * 0.299
+            + g_chan.astype(float) * 0.587
+            + b_chan.astype(float) * 0.114
+        )
         lum_min = float(np.min(gray))
         lum_max = float(np.max(gray))
         lum_mean = round(float(np.mean(gray)), 2)
         lum_std = round(float(np.std(gray)), 2)
 
-        # Sharpness indicator: variance of the Laplacian
-        if height >= 3 and width >= 3:
-            lap = (
-                gray[:-2, 1:-1]
-                + gray[2:, 1:-1]
-                + gray[1:-1, :-2]
-                + gray[1:-1, 2:]
-                - 4.0 * gray[1:-1, 1:-1]
-            )
-            sharpness_score = round(float(lap.var()), 2)
-        else:
-            sharpness_score = 0.0
+        sharpness_score = round(compute_laplacian_variance(gray), 2)
 
-        # Noise indicator: median standard deviation of smoothest 20% patches (16x16)
-        # Excludes patches dominated by saturated endpoints (pure white/black clipping)
+        # Estimate noise from median std dev of the smoothest 20% of 16x16 patches
         patch_size = 16
         patch_stds: List[float] = []
         if height >= patch_size and width >= patch_size:
             for y in range(0, height - patch_size + 1, patch_size):
                 for x in range(0, width - patch_size + 1, patch_size):
                     patch = gray[y : y + patch_size, x : x + patch_size]
-                    # Skip patches dominated by hard clipping (> 50% pixels at 0 or 255)
                     clipped_in_patch = ((patch <= 0.5) | (patch >= 254.5)).mean()
                     if clipped_in_patch > 0.5:
                         continue
@@ -287,8 +309,6 @@ def compute_measured_clues(img: Image.Image) -> Dict[str, Any]:
             noise_std = 0.0
 
     else:
-        # Pure-Pillow fallback
-        stat = ImageStat.Stat(rgb)
         hist = rgb.histogram()
         r_hist = hist[0:256]
         g_hist = hist[256:512]
@@ -301,7 +321,6 @@ def compute_measured_clues(img: Image.Image) -> Dict[str, Any]:
         b_zero = b_hist[0]
         b_255 = b_hist[255]
 
-        # Use conservative estimate from L histogram for joint clipping
         l_img = rgb.convert("L")
         l_hist = l_img.histogram()
         shadow_clipped_pixels = l_hist[0]
@@ -313,15 +332,12 @@ def compute_measured_clues(img: Image.Image) -> Dict[str, Any]:
         lum_mean = round(float(l_stat.mean[0]), 2)
         lum_std = round(float(l_stat.stddev[0]), 2)
 
-        edges = l_img.filter(ImageFilter.FIND_EDGES)
-        edge_stat = ImageStat.Stat(edges)
-        sharpness_score = round(float(edge_stat.var[0]), 2)
+        sharpness_score = round(compute_laplacian_variance(l_img), 2)
         noise_std = round(float(lum_std * 0.1), 2)
 
     shadow_pct = round(shadow_clipped_pixels / total_pixels * 100, 3)
     highlight_pct = round(highlight_clipped_pixels / total_pixels * 100, 3)
 
-    # Classifications for quick interpretation
     if sharpness_score >= 1000.0:
         sharpness_label = "High edge contrast / very sharp"
     elif sharpness_score >= 250.0:
@@ -396,7 +412,6 @@ def generate_preview(
     else:
         preview = img.copy()
         pw, ph = w, h
-        scale = 1.0
 
     preview.save(dest_path, format="PNG")
     return {
@@ -427,26 +442,22 @@ def generate_native_crops(
         for idx, reg in enumerate(regions):
             if len(reg) == 4:
                 rx, ry, rw, rh = (int(v) for v in reg)
-                # Clamp within image bounds
                 rx = max(0, min(rx, max(0, w - 1)))
                 ry = max(0, min(ry, max(0, h - 1)))
                 rw = max(1, min(rw, w - rx))
                 rh = max(1, min(rh, h - ry))
                 crop_specs.append((f"region_{idx}", rx, ry, rw, rh))
     else:
-        # Default strategic crops: center + 4 corners
         center_x = max(0, (w - cw) // 2)
         center_y = max(0, (h - ch) // 2)
         crop_specs.append(("center", center_x, center_y, cw, ch))
 
-        # Corners
         crop_specs.append(("top_left", 0, 0, cw, ch))
         crop_specs.append(("top_right", max(0, w - cw), 0, cw, ch))
         crop_specs.append(("bottom_left", 0, max(0, h - ch), cw, ch))
         crop_specs.append(("bottom_right", max(0, w - cw), max(0, h - ch), cw, ch))
 
     results: List[Dict[str, Any]] = []
-    # Deduplicate crops with identical boxes
     seen_boxes = set()
 
     for name, x, y, rw, rh in crop_specs:
@@ -483,12 +494,7 @@ def prepare_inspection(
     regions: Optional[Sequence[Sequence[int]]] = None,
     target_print_sizes: Optional[Sequence[Any]] = None,
 ) -> Dict[str, Any]:
-    """Prepare an image for agent visual inspection.
-
-    Generates a bounded preview and 1:1 native-resolution crops into working_dir
-    without altering the source file. Reports metadata, orientation, ICC profile,
-    effective print PPI, and measured clues (endpoint clipping, sharpness, noise).
-    """
+    """Generate a bounded preview, 1:1 crops, print PPI estimates, and image metrics."""
     source_path = Path(path_str).expanduser()
     if not source_path.is_file():
         return {
@@ -498,7 +504,6 @@ def prepare_inspection(
             "error": f"Image file does not exist: {source_path}",
         }
 
-    # Verify image integrity and measure source SHA-256
     original_sha256 = sha256_file(source_path)
     original_size = source_path.stat().st_size
 
@@ -515,7 +520,6 @@ def prepare_inspection(
             "error": f"Corrupt or unreadable image file: {exc}",
         }
 
-    # Resolve working directory
     if working_dir is None:
         work_path = Path(tempfile.mkdtemp(prefix="artcraft_inspection_"))
     else:
@@ -531,21 +535,14 @@ def prepare_inspection(
             color_info = extract_color_profile(img)
             dpi = img.info.get("dpi")
 
-            # Generate whole-photo preview
             preview_filename = f"preview_{source_path.stem}.png"
             preview_path = work_path / preview_filename
             preview_info = generate_preview(img, preview_path, max_preview_dimension)
 
-            # Generate 1:1 native crops
             crops_info = generate_native_crops(img, work_path, crop_size=crop_size, regions=regions)
-
-            # Compute effective print PPI
             print_ppi = compute_effective_ppi(w, h, target_print_sizes=target_print_sizes)
-
-            # Compute measured clues (clipping, sharpness, noise) with explicit limits
             clues = compute_measured_clues(img)
 
-        # Confirm source file was not modified
         post_sha256 = sha256_file(source_path)
         if post_sha256 != original_sha256:
             raise RuntimeError("Source image was modified during inspection preparation!")

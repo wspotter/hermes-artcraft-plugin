@@ -3,16 +3,17 @@
 from __future__ import annotations
 
 import json
-from typing import Any, Dict
+import math
+from typing import Any, Dict, Optional
 
-from .discovery import discover_all
+from .discovery import status_payload
 from .inspect import prepare_inspection
 from .jobs import (
     get_job,
     init_job,
+    reconcile_delivery,
     record_delivery,
     record_export_artifact,
-    reconcile_delivery,
     resume_job,
     save_checkpoint,
 )
@@ -28,16 +29,38 @@ from .suite_basics import (
 from .verify import inspect_image, verify_edit
 
 
+def _parse_positive_int(value: Any, default: Optional[int], name: str) -> int:
+    """Parse a positive integer argument, rejecting booleans, non-integers, and <= 0."""
+    if value is None:
+        if default is not None:
+            return default
+        raise ValueError(f"Missing required '{name}'")
+    if isinstance(value, bool) or (isinstance(value, float) and not value.is_integer()):
+        raise ValueError(f"'{name}' must be a positive integer")
+    parsed = int(value)
+    if parsed <= 0:
+        raise ValueError(f"'{name}' must be a positive integer")
+    return parsed
+
+
+def _parse_positive_float(value: Any, default: Optional[float], name: str) -> float:
+    """Parse a finite positive float argument, rejecting booleans, NaN/Inf, and <= 0."""
+    if value is None:
+        if default is not None:
+            return default
+        raise ValueError(f"Missing required '{name}'")
+    if isinstance(value, bool):
+        raise ValueError(f"'{name}' must be a positive number")
+    parsed = float(value)
+    if not math.isfinite(parsed) or parsed <= 0:
+        raise ValueError(f"'{name}' must be a positive number")
+    return parsed
+
+
 def artcraft_status(args: Dict[str, Any], **kwargs: Any) -> str:
-    """Return discovered ArtCraft CLI binaries and versions as JSON."""
+    """Return discovered ArtCraft CLI binaries, versions, and tool availability as JSON."""
     try:
-        discovered = discover_all()
-        return json.dumps(
-            {
-                "ok": True,
-                "apps": {name: info.to_dict() for name, info in discovered.items()},
-            }
-        )
+        return json.dumps(status_payload())
     except Exception as exc:
         return json.dumps({"ok": False, "error": str(exc)})
 
@@ -55,7 +78,7 @@ def artcraft_inspect(args: Dict[str, Any], **kwargs: Any) -> str:
 
 
 def artcraft_prepare_inspection(args: Dict[str, Any], **kwargs: Any) -> str:
-    """Prepare whole-photo preview, native crops, print PPI, and measured clues."""
+    """Prepare whole-photo preview, native crops, print PPI, and image metrics."""
     path = args.get("path")
     if not isinstance(path, str) or not path.strip():
         return json.dumps({"ok": False, "error": "Missing required 'path' string"})
@@ -109,24 +132,26 @@ def _run_app_cli(app: str, args: Dict[str, Any]) -> str:
 
 
 def photocraft_run(args: Dict[str, Any], **kwargs: Any) -> str:
-    """Run photocraft-cli with guards and verification."""
+    """Run photocraft-cli --help or --version."""
     return _run_app_cli("photocraft", args)
 
 
 def lightcraft_run(args: Dict[str, Any], **kwargs: Any) -> str:
-    """Run lightcraft-cli with guards and verification."""
+    """Run lightcraft-cli --help or --version."""
     return _run_app_cli("lightcraft", args)
 
 
 def photocraft_spot_heal(args: Dict[str, Any], **kwargs: Any) -> str:
     """Run the verified spot-heal workflow."""
     try:
-        timeout_s = args.get("timeout_s", 120.0)
+        timeout_s = _parse_positive_float(args.get("timeout_s"), 120.0, "timeout_s")
         return json.dumps(
             spot_heal(
-                *(args[key] for key in (
-                    "input_path", "output_path", "points", "size", "region",
-                )),
+                input_path=args["input_path"],
+                output_path=args["output_path"],
+                points=args["points"],
+                size=args["size"],
+                region=args["region"],
                 timeout_s=timeout_s,
             )
         )
@@ -135,7 +160,7 @@ def photocraft_spot_heal(args: Dict[str, Any], **kwargs: Any) -> str:
 
 
 def artcraft_prepare_print(args: Dict[str, Any], **kwargs: Any) -> str:
-    """Prepare a verified print delivery file or return clarification needed."""
+    """Prepare a print output file or return a clarification prompt."""
     try:
         input_path = args.get("input_path")
         output_path = args.get("output_path")
@@ -149,22 +174,30 @@ def artcraft_prepare_print(args: Dict[str, Any], **kwargs: Any) -> str:
         if width_in is None or height_in is None:
             return json.dumps({"ok": False, "error": "Missing required 'width_in' or 'height_in'"})
 
+        width_val = _parse_positive_float(width_in, None, "width_in")
+        height_val = _parse_positive_float(height_in, None, "height_in")
+        ppi_val = _parse_positive_int(args.get("ppi"), 300, "ppi")
+        allow_overwrite_raw = args.get("allow_overwrite")
+        if allow_overwrite_raw is None:
+            allow_overwrite_raw = args.get("overwrite", False)
+        allow_overwrite = bool(allow_overwrite_raw)
+
         result = prepare_print(
             input_path=input_path,
             output_path=output_path,
-            width_in=float(width_in),
-            height_in=float(height_in),
+            width_in=width_val,
+            height_in=height_val,
             orientation=args.get("orientation", "auto"),
             fit_mode=args.get("fit_mode", "auto"),
             confirm_crop=bool(args.get("confirm_crop", False)),
-            ppi=int(args.get("ppi", 300)),
+            ppi=ppi_val,
             output_format=args.get("output_format", "auto"),
             margin_color=args.get("margin_color", "white"),
             preserve_master_path=args.get("preserve_master_path"),
             allow_upscale=bool(args.get("allow_upscale", False)),
             target_icc=args.get("target_icc"),
             preview_path=args.get("preview_path"),
-            overwrite=bool(args.get("overwrite", False)),
+            allow_overwrite=allow_overwrite,
         )
         return json.dumps(result)
     except Exception as exc:
@@ -177,11 +210,23 @@ def artcraft_restore_step(args: Dict[str, Any], **kwargs: Any) -> str:
         input_path = args.get("input_path")
         output_path = args.get("output_path")
         recipe = args.get("recipe")
-        if not input_path or not output_path or not recipe:
+        if (
+            not isinstance(input_path, str)
+            or not input_path.strip()
+            or not isinstance(output_path, str)
+            or not output_path.strip()
+            or not isinstance(recipe, str)
+            or not recipe.strip()
+        ):
             return json.dumps({
                 "ok": False,
                 "error": "Missing required 'input_path', 'output_path', or 'recipe'",
             })
+
+        target_print_ppi = _parse_positive_int(
+            args.get("target_print_ppi"), 300, "target_print_ppi"
+        )
+        timeout_s = _parse_positive_float(args.get("timeout_s"), 120.0, "timeout_s")
 
         result = restore_step(
             input_path=input_path,
@@ -192,11 +237,11 @@ def artcraft_restore_step(args: Dict[str, Any], **kwargs: Any) -> str:
             checkpoint_dir=args.get("checkpoint_dir"),
             step_name=args.get("step_name"),
             crop_regions=args.get("crop_regions"),
-            target_print_ppi=int(args.get("target_print_ppi", 300)),
+            target_print_ppi=target_print_ppi,
             reconstruct_missing=bool(args.get("reconstruct_missing", False)),
             content_type=args.get("content_type"),
             allow_overwrite=bool(args.get("allow_overwrite", False)),
-            timeout_s=float(args.get("timeout_s", 120.0)),
+            timeout_s=timeout_s,
         )
         return json.dumps(result)
     except Exception as exc:
@@ -217,10 +262,16 @@ def artcraft_checkpoint(args: Dict[str, Any], **kwargs: Any) -> str:
         elif action == "get":
             step_identifier = args.get("step_identifier")
             if step_identifier is None:
-                return json.dumps({"ok": False, "error": "Missing 'step_identifier' for get action"})
+                return json.dumps({
+                    "ok": False,
+                    "error": "Missing 'step_identifier' for get action",
+                })
             cp = get_checkpoint(checkpoint_dir, step_identifier)
             if cp is None:
-                return json.dumps({"ok": False, "error": f"Checkpoint '{step_identifier}' not found"})
+                return json.dumps({
+                    "ok": False,
+                    "error": f"Checkpoint '{step_identifier}' not found",
+                })
             return json.dumps({"ok": True, "checkpoint": cp})
         else:
             return json.dumps({"ok": False, "error": f"Unknown action: {action!r}"})
@@ -229,14 +280,22 @@ def artcraft_checkpoint(args: Dict[str, Any], **kwargs: Any) -> str:
 
 
 def artcraft_build_review(args: Dict[str, Any], **kwargs: Any) -> str:
-    """Build a review package for an image edit and detect defect traps."""
+    """Build a review package for an image edit and run defect checks."""
     try:
         source_path = args.get("source_path")
         output_path = args.get("output_path")
         if not isinstance(source_path, str) or not source_path.strip():
-            return json.dumps({"ok": False, "passed": False, "error": "Missing required 'source_path' string"})
+            return json.dumps({
+                "ok": False,
+                "passed": False,
+                "error": "Missing required 'source_path' string",
+            })
         if not isinstance(output_path, str) or not output_path.strip():
-            return json.dumps({"ok": False, "passed": False, "error": "Missing required 'output_path' string"})
+            return json.dumps({
+                "ok": False,
+                "passed": False,
+                "error": "Missing required 'output_path' string",
+            })
 
         result = build_review_package(
             source_path=source_path,
@@ -259,7 +318,7 @@ def artcraft_build_review(args: Dict[str, Any], **kwargs: Any) -> str:
 
 
 def artcraft_job(args: Dict[str, Any], **kwargs: Any) -> str:
-    """Manage deterministic job workspaces, checkpoints, exports, deliveries, and reconciliation."""
+    """Manage job workspaces, checkpoints, exports, deliveries, and reconciliation."""
     action = args.get("action")
     job_id = args.get("job_id")
     if not isinstance(action, str) or not action.strip():
@@ -282,7 +341,10 @@ def artcraft_job(args: Dict[str, Any], **kwargs: Any) -> str:
             stage = args.get("stage")
             file_path = args.get("file_path")
             if not stage or not file_path:
-                return json.dumps({"ok": False, "error": "Checkpoint action requires 'stage' and 'file_path'"})
+                return json.dumps({
+                    "ok": False,
+                    "error": "Checkpoint action requires 'stage' and 'file_path'",
+                })
             res = save_checkpoint(
                 job_id=job_id,
                 stage=str(stage),
@@ -301,7 +363,10 @@ def artcraft_job(args: Dict[str, Any], **kwargs: Any) -> str:
             artifact_id = args.get("artifact_id")
             file_path = args.get("file_path")
             if not artifact_id or not file_path:
-                return json.dumps({"ok": False, "error": "Export action requires 'artifact_id' and 'file_path'"})
+                return json.dumps({
+                    "ok": False,
+                    "error": "Export action requires 'artifact_id' and 'file_path'",
+                })
             res = record_export_artifact(
                 job_id=job_id,
                 artifact_id=str(artifact_id),
@@ -316,7 +381,10 @@ def artcraft_job(args: Dict[str, Any], **kwargs: Any) -> str:
             destination = args.get("destination")
             artifact_id = args.get("artifact_id")
             if not destination or not artifact_id:
-                return json.dumps({"ok": False, "error": "Deliver action requires 'destination' and 'artifact_id'"})
+                return json.dumps({
+                    "ok": False,
+                    "error": "Deliver action requires 'destination' and 'artifact_id'",
+                })
             res = record_delivery(
                 job_id=job_id,
                 destination=str(destination),
@@ -359,9 +427,17 @@ def artcraft_develop(args: Dict[str, Any], **kwargs: Any) -> str:
         input_path = args.get("input_path")
         output_path = args.get("output_path")
         if not isinstance(input_path, str) or not input_path.strip():
-            return json.dumps({"ok": False, "app": "lightcraft", "error": "Missing required 'input_path' string"})
+            return json.dumps({
+                "ok": False,
+                "app": "lightcraft",
+                "error": "Missing required 'input_path' string",
+            })
         if not isinstance(output_path, str) or not output_path.strip():
-            return json.dumps({"ok": False, "app": "lightcraft", "error": "Missing required 'output_path' string"})
+            return json.dumps({
+                "ok": False,
+                "app": "lightcraft",
+                "error": "Missing required 'output_path' string",
+            })
 
         res = lightcraft_develop(
             input_path=input_path,
@@ -385,9 +461,17 @@ def artcraft_audio_basic(args: Dict[str, Any], **kwargs: Any) -> str:
         action = args.get("action")
         input_path = args.get("input_path")
         if not isinstance(action, str) or not action.strip():
-            return json.dumps({"ok": False, "app": "soundcraft", "error": "Missing required 'action' string"})
+            return json.dumps({
+                "ok": False,
+                "app": "soundcraft",
+                "error": "Missing required 'action' string",
+            })
         if not isinstance(input_path, str) or not input_path.strip():
-            return json.dumps({"ok": False, "app": "soundcraft", "error": "Missing required 'input_path' string"})
+            return json.dumps({
+                "ok": False,
+                "app": "soundcraft",
+                "error": "Missing required 'input_path' string",
+            })
 
         res = soundcraft_audio_basic(
             action=action,
@@ -410,7 +494,11 @@ def artcraft_video_basic(args: Dict[str, Any], **kwargs: Any) -> str:
     try:
         action = args.get("action")
         if not isinstance(action, str) or not action.strip():
-            return json.dumps({"ok": False, "app": "filmcraft", "error": "Missing required 'action' string"})
+            return json.dumps({
+                "ok": False,
+                "app": "filmcraft",
+                "error": "Missing required 'action' string",
+            })
 
         res = filmcraft_video_basic(
             action=action,
@@ -432,9 +520,4 @@ def artcraft_video_basic(args: Dict[str, Any], **kwargs: Any) -> str:
         return json.dumps(res)
     except Exception as exc:
         return json.dumps({"ok": False, "app": "filmcraft", "error": str(exc)})
-
-
-
-
-
 

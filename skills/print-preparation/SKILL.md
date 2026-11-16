@@ -12,19 +12,19 @@ metadata:
     related_skills: [artcraft-router, photo-inspection, recipe-enlargement]
 ---
 
-# Print Preparation Skill
+# Print Preparation
 
-Prepare print-ready delivery files at exact physical dimensions and target PPI using `artcraft_prepare_print` (`hermes artcraft prep-print`). Enforces aspect-ratio clarification gates, preserves 1:1 pixel proportions and ICC color profiles, and verifies the exported file from disk.
+Prepare print-ready files at exact physical dimensions and target PPI using `artcraft_prepare_print` (`hermes artcraft prep-print`). Stops before cropping mismatched aspect ratios, preserves 1:1 pixel proportions and ICC color profiles, and verifies the exported file from disk.
 
 ## When to Use
 
-- Formatting a photograph for physical printing at specific sheet dimensions (`width_in`, `height_in`) and resolution (`ppi`, default 300).
-- Resolving aspect-ratio mismatches between the source image and target print sheet (`margins` vs `borderless` crop).
+- Sizing a photo for physical print dimensions (`width_in`, `height_in`) at a target `ppi` (default `300`).
+- Handling aspect-ratio differences between the source image and print sheet (`margins` vs `borderless`).
 
 ## Prerequisites
 
-- Pillow available in the plugin Python environment (`artcraft_status`).
-- Source photograph inspected via `artcraft_inspect` or `artcraft_prepare_inspection`.
+- Pillow installed in the plugin Python environment (`artcraft_status`).
+- Source photo inspected via `artcraft_inspect` or `artcraft_prepare_inspection` so you know its resolution and effective PPI before exporting.
 
 ## How to Run
 
@@ -62,22 +62,22 @@ hermes artcraft prep-print <work_dir>/source/photo.png <work_dir>/exports/print_
 
 ## Procedure
 
-1. **Calculate target dimensions**: Target pixel dimensions equal `round(width_in * ppi)` by `round(height_in * ppi)`.
-2. **Enforce the Clarification Gate**:
-   - When `fit_mode` is `"margins"` (or `"fit"`), the full photograph is preserved and centered with margins (`margin_color`).
-   - When the source aspect ratio differs from the sheet ratio and `fit_mode` is `"borderless"` / `"crop"` or `"auto"` without `confirm_crop=true`, `artcraft_prepare_print` stops without writing an output file and returns `status: "needs_clarification"` with the question:
+1. Calculate target pixel dimensions (`round(width_in * ppi)` by `round(height_in * ppi)`) and check `print_resolution` from `artcraft_prepare_inspection` first.
+2. Handle aspect-ratio mismatches before writing:
+   - `"margins"` (or `"fit"`) keeps the full photo centered with `margin_color` borders.
+   - If the source and sheet aspect ratios differ and `fit_mode` is `"borderless"`, `"crop"`, or `"auto"` without `confirm_crop=true`, `artcraft_prepare_print` stops without writing an output file and returns `status: "needs_clarification"` with:
      *"Should the photo fill the [sheet] sheet with a [target_ratio] crop, or keep the [source_ratio] crop and add margins?"*
-   - Only pass `confirm_crop=true` after the human operator confirms cropping.
-3. **Preserve proportions and color profiles**:
-   - Resizing uses Lanczos resampling with strict 1:1 pixel aspect ratio (never stretch).
-   - Embedded ICC profiles (sRGB, Display P3, Adobe RGB) are retained in the exported deliverable.
-   - Check `effective_source_ppi` vs `export_ppi`; if `effective_source_ppi < ppi` and `allow_upscale=false`, pause for confirmation.
+   - Only pass `confirm_crop=true` after the user explicitly confirms cropping.
+3. Preserve proportions, color profiles, and print PPI:
+   - Resizing uses Lanczos with 1:1 proportions (no stretching) and preserves embedded ICC profiles (or converts to `target_icc` / `"sRGB"`).
+   - When `allow_upscale=false` (the default) and source dimensions or effective PPI fall below the target print size at `ppi`, `artcraft_prepare_print` returns an error (`{"ok": false, "error": ...}`) instead of quietly stretching pixels. Check PPI first, and ask the user whether to enlarge (`recipe-enlargement`), lower `ppi`, or retry with `allow_upscale=true`.
 
 ## Pitfalls
 
-- Never pass `confirm_crop=true` on a mismatched aspect ratio unless the user explicitly chose a borderless crop.
-- For intentional manual crops, pass `crop_geometry` to `artcraft_build_review` (`hermes artcraft review --no-preserve-framing --crop-geometry ...`) to review the shaded trim boundary.
+- Never pass `confirm_crop=true` on a mismatched aspect ratio unless the user explicitly asked for a borderless crop.
+- Never enable `allow_upscale=true` without telling the user the effective source PPI will be below the target print PPI.
+- For intentional manual crops, pass `crop_geometry` to `artcraft_build_review` (`hermes artcraft review --no-preserve-framing --crop-geometry ...`) to inspect the shaded trim overlay.
 
 ## Verification
 
-- `artcraft_prepare_print` reopens and decodes `output_path` from disk, confirming target pixel width and height, file format, DPI metadata, embedded ICC profile presence, unchanged `source_sha256`, and a visual composition preview.
+- `artcraft_prepare_print` reopens `output_path` from disk and verifies exact pixel dimensions, file format, DPI metadata, `delivery_file.sha256`, `effective_source_ppi` vs `export_ppi`, ICC profile status, and `preview_path`.

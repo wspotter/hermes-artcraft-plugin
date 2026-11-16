@@ -1,6 +1,6 @@
 name: artcraft
 version: "0.2.0"
-description: "CLI-first tools and automatic post-edit verification for ArtCraft apps (PhotoCraft, LightCraft, FilmCraft, SoundCraft)."
+description: "Run PhotoCraft, LightCraft, FilmCraft, and SoundCraft from Hermes without touching original files."
 author: "wspotter"
 license: "MIT"
 kind: standalone

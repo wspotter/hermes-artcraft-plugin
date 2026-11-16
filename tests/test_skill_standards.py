@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import re
 import unittest
 from pathlib import Path
@@ -36,15 +37,24 @@ BANNED_MARKETING = re.compile(
     re.IGNORECASE,
 )
 
-PRIVATE_IDENTIFIERS = re.compile(
-    r"\b(ollie|otto|printery|stacy|katherine|ottostacy|sr730|r7910|t7910)\b",
-    re.IGNORECASE,
-)
-
 MACHINE_LOCAL_PATH = re.compile(
     r"/home/(?!runner\b)[a-z0-9_-]+/|[A-Z]:\\+Users\\+(?!<)",
     re.IGNORECASE,
 )
+
+RFC1918_IP = re.compile(
+    r"(?<![0-9.])(?:192\.168\.\d{1,3}\.\d{1,3}|10\.\d{1,3}\.\d{1,3}\.\d{1,3}|172\.(?:1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3})(?![0-9.])"
+)
+
+
+def _forbidden_terms_pattern() -> re.Pattern[str] | None:
+    raw = os.environ.get("ARTCRAFT_FORBIDDEN_TERMS", "").strip()
+    if not raw:
+        return None
+    terms = [re.escape(part.strip()) for part in re.split(r"[,|]", raw) if part.strip()]
+    if not terms:
+        return None
+    return re.compile(r"\b(?:" + "|".join(terms) + r")\b", re.IGNORECASE)
 
 SHELL_FENCE_OPEN = re.compile(
     r"^\s*(`{3,}|~{3,})\s*(bash|sh|shell|zsh|console)\b",
@@ -79,14 +89,14 @@ def _parse_skill(path: Path) -> tuple[dict, str]:
 
 
 class SkillStandardsTest(unittest.TestCase):
-    """Verify every bundled SKILL.md satisfies Hermes skills/AGENTS.md hardline rules."""
+    """Verify every bundled SKILL.md follows Hermes skill packaging and portability conventions."""
 
     def test_expected_skill_directories_exist(self) -> None:
         skill_files = sorted(SKILLS_DIR.glob("*/SKILL.md"))
         found_names = {p.parent.name for p in skill_files}
         self.assertEqual(found_names, EXPECTED_SKILLS)
 
-    def test_frontmatter_and_description_hardline(self) -> None:
+    def test_frontmatter_and_description_rules(self) -> None:
         skill_files = sorted(SKILLS_DIR.glob("*/SKILL.md"))
         all_skill_names = {p.parent.name for p in skill_files}
 
@@ -109,7 +119,10 @@ class SkillStandardsTest(unittest.TestCase):
                 self.assertEqual(
                     fm["name"],
                     skill_path.parent.name,
-                    f"{rel}: frontmatter name {fm['name']!r} != directory {skill_path.parent.name!r}",
+                    (
+                        f"{rel}: frontmatter name {fm['name']!r} "
+                        f"!= directory {skill_path.parent.name!r}"
+                    ),
                 )
                 self.assertEqual(fm["version"], "0.1.0")
                 self.assertEqual(fm["author"], "wspotter")
@@ -153,28 +166,48 @@ class SkillStandardsTest(unittest.TestCase):
                     desc.lower(),
                     f"{rel}: description must not repeat skill name {fm['name']!r}",
                 )
+                self.assertNotIn(
+                    hermes_meta["category"].lower(),
+                    desc.lower(),
+                    f"{rel}: description must not repeat category {hermes_meta['category']!r}",
+                )
 
                 # Also check the raw regex check from skills/AGENTS.md:
                 raw_desc_match = re.search(r"^description: (.*)$", content, re.M)
                 self.assertIsNotNone(raw_desc_match, f"{rel}: single-line description required")
                 self.assertLessEqual(len(raw_desc_match.group(1).strip("\"'")), 60)
 
-    def test_no_private_identifiers_or_machine_paths(self) -> None:
+    def test_no_machine_paths_or_private_ips(self) -> None:
         paths_to_check = sorted(SKILLS_DIR.glob("*/SKILL.md")) + [README_PATH]
+        forbidden_re = _forbidden_terms_pattern()
         for path in paths_to_check:
             rel = path.relative_to(REPO_ROOT)
             with self.subTest(file=str(rel)):
                 content = path.read_text(encoding="utf-8")
-                priv_match = PRIVATE_IDENTIFIERS.search(content)
-                self.assertIsNone(
-                    priv_match,
-                    f"{rel}: found private identifier {priv_match.group(0)!r}" if priv_match else "",
-                )
                 path_match = MACHINE_LOCAL_PATH.search(content)
                 self.assertIsNone(
                     path_match,
-                    f"{rel}: found machine-local path {path_match.group(0)!r}" if path_match else "",
+                    (
+                        f"{rel}: found machine-local path {path_match.group(0)!r}"
+                        if path_match
+                        else ""
+                    ),
                 )
+                ip_match = RFC1918_IP.search(content)
+                self.assertIsNone(
+                    ip_match,
+                    f"{rel}: found private RFC1918 IP {ip_match.group(0)!r}" if ip_match else "",
+                )
+                if forbidden_re is not None:
+                    term_match = forbidden_re.search(content)
+                    self.assertIsNone(
+                        term_match,
+                        (
+                            f"{rel}: found forbidden term {term_match.group(0)!r}"
+                            if term_match
+                            else ""
+                        ),
+                    )
 
     def test_shell_fences_are_paste_safe(self) -> None:
         for skill_path in sorted(SKILLS_DIR.glob("*/SKILL.md")):

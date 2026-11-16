@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import os
-import shutil
 import subprocess
 import time
 from pathlib import Path
@@ -14,7 +13,7 @@ from typing import Any, Dict, List, Optional
 from PIL import Image
 
 from .discovery import find_cli_binary
-from .runner import _paths_refer_to_same_file
+from .runner import _paths_refer_to_same_file, atomic_replace_file
 from .verify import inspect_image, sha256_file
 
 FILMCRAFT_TICKS_PER_SECOND = 254_016_000_000
@@ -22,10 +21,7 @@ FILMCRAFT_TICKS_PER_SECOND = 254_016_000_000
 
 def _atomic_promote(src: Path, dst: Path, *, allow_overwrite: bool = False) -> None:
     """Atomically promote a verified temporary output file to dst."""
-    dst.parent.mkdir(parents=True, exist_ok=True)
-    if dst.exists() and not allow_overwrite:
-        raise FileExistsError(f"Output path already exists: {dst} (set allow_overwrite=True to replace)")
-    shutil.move(str(src), str(dst))
+    atomic_replace_file(src, dst, allow_overwrite=allow_overwrite)
 
 
 def lightcraft_develop(
@@ -54,11 +50,14 @@ def lightcraft_develop(
             "error": "non_destructive_guard: output_path must be distinct from input_path",
         }
 
-    if out_path.exists() and not allow_overwrite:
+    if os.path.lexists(out_path) and not allow_overwrite:
         return {
             "ok": False,
             "app": "lightcraft",
-            "error": f"Output file already exists: {out_path} (set allow_overwrite=True to overwrite)",
+            "error": (
+                f"Output file already exists: {out_path} "
+                "(set allow_overwrite=True to overwrite)"
+            ),
         }
 
     binary = find_cli_binary("lightcraft")
@@ -86,13 +85,21 @@ def lightcraft_develop(
 
         if long_edge is not None:
             if int(long_edge) <= 0:
-                return {"ok": False, "app": "lightcraft", "error": "long_edge must be a positive integer"}
+                return {
+                    "ok": False,
+                    "app": "lightcraft",
+                    "error": "long_edge must be a positive integer",
+                }
             cmd.extend(["--size", str(int(long_edge))])
 
         if quality is not None:
             q_int = int(quality)
             if not 1 <= q_int <= 100:
-                return {"ok": False, "app": "lightcraft", "error": "quality must be between 1 and 100"}
+                return {
+                    "ok": False,
+                    "app": "lightcraft",
+                    "error": "quality must be between 1 and 100",
+                }
             cmd.extend(["--quality", str(q_int)])
 
         if export_options:
@@ -145,12 +152,17 @@ def lightcraft_develop(
             }
 
         out_info = inspect_image(str(tmp_out))
-        if not out_info.get("valid") or out_info.get("width", 0) <= 0 or out_info.get("height", 0) <= 0:
+        if (
+            not out_info.get("valid")
+            or out_info.get("width", 0) <= 0
+            or out_info.get("height", 0) <= 0
+        ):
+            err_detail = out_info.get("error", "invalid image")
             return {
                 "ok": False,
                 "app": "lightcraft",
                 "command": cmd,
-                "error": f"Rendered output failed image verification: {out_info.get('error', 'invalid image')}",
+                "error": f"Rendered output failed image verification: {err_detail}",
             }
 
         if sha256_file(src_path) != source_sha256:
@@ -178,7 +190,9 @@ def lightcraft_develop(
     }
 
 
-def _soundcraft_probe_dict(binary: Path, target_path: Path, timeout_s: float = 30.0) -> Dict[str, Any]:
+def _soundcraft_probe_dict(
+    binary: Path, target_path: Path, timeout_s: float = 30.0
+) -> Dict[str, Any]:
     """Run `soundcraft-cli info <FILE>` and return parsed JSON metadata."""
     proc = subprocess.run(
         [str(binary), "info", str(target_path)],
@@ -188,9 +202,8 @@ def _soundcraft_probe_dict(binary: Path, target_path: Path, timeout_s: float = 3
         check=False,
     )
     if proc.returncode != 0:
-        raise RuntimeError(
-            f"soundcraft-cli info exited with code {proc.returncode}: {(proc.stderr or proc.stdout).strip()}"
-        )
+        detail = (proc.stderr or proc.stdout).strip()
+        raise RuntimeError(f"soundcraft-cli info exited with code {proc.returncode}: {detail}")
     out = proc.stdout.strip()
     try:
         parsed = json.loads(out)
@@ -223,7 +236,12 @@ def soundcraft_audio_basic(
 
     src_path = Path(input_path).expanduser()
     if not src_path.is_file():
-        return {"ok": False, "app": "soundcraft", "action": action, "error": f"Input file does not exist: {src_path}"}
+        return {
+            "ok": False,
+            "app": "soundcraft",
+            "action": action,
+            "error": f"Input file does not exist: {src_path}",
+        }
 
     binary = find_cli_binary("soundcraft")
     if binary is None:
@@ -284,12 +302,15 @@ def soundcraft_audio_basic(
             "error": "non_destructive_guard: output_path must be distinct from input_path",
         }
 
-    if out_path.exists() and not allow_overwrite:
+    if os.path.lexists(out_path) and not allow_overwrite:
         return {
             "ok": False,
             "app": "soundcraft",
             "action": "convert",
-            "error": f"Output file already exists: {out_path} (set allow_overwrite=True to overwrite)",
+            "error": (
+                f"Output file already exists: {out_path} "
+                "(set allow_overwrite=True to overwrite)"
+            ),
         }
 
     if bit_depth is not None and str(bit_depth) not in ("16", "24", "32f"):
@@ -311,7 +332,12 @@ def soundcraft_audio_basic(
     try:
         input_info = _soundcraft_probe_dict(binary, src_path, timeout_s=timeout_s)
     except Exception as exc:
-        return {"ok": False, "app": "soundcraft", "action": "convert", "error": f"Input audio probe failed: {exc}"}
+        return {
+            "ok": False,
+            "app": "soundcraft",
+            "action": "convert",
+            "error": f"Input audio probe failed: {exc}",
+        }
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
     suffix = out_path.suffix or ".wav"
@@ -412,7 +438,7 @@ def soundcraft_audio_basic(
 
 
 def _check_jsonl_run_output(stdout_text: str) -> Optional[str]:
-    """Inspect JSONL output from `filmcraft-cli run -` and return an error message if any line failed."""
+    """Inspect `filmcraft-cli run -` JSONL output and return an error message if any failed."""
     for raw_line in stdout_text.splitlines():
         line = raw_line.strip()
         if not line or not line.startswith("{"):
@@ -444,7 +470,7 @@ def filmcraft_video_basic(
     allow_overwrite: bool = False,
     timeout_s: float = 180.0,
 ) -> Dict[str, Any]:
-    """Probe media, extract still frames, or export video/audio non-destructively via `filmcraft-cli`."""
+    """Probe media, extract frames, or export video/audio non-destructively via `filmcraft-cli`."""
     if action not in ("probe", "render_frame", "export"):
         return {
             "ok": False,
@@ -558,7 +584,7 @@ def filmcraft_video_basic(
             "probe": probe_data,
         }
 
-    # Both render_frame and export require output_path and one source (input_path, project_path, or demo)
+    # Both render_frame and export require output_path and one source (input, project, or demo)
     if not output_path or not str(output_path).strip():
         return {
             "ok": False,
@@ -591,12 +617,15 @@ def filmcraft_video_basic(
             "error": "non_destructive_guard: output_path must be distinct from project_path",
         }
 
-    if out_path.exists() and not allow_overwrite:
+    if os.path.lexists(out_path) and not allow_overwrite:
         return {
             "ok": False,
             "app": "filmcraft",
             "action": action,
-            "error": f"Output file already exists: {out_path} (set allow_overwrite=True to overwrite)",
+            "error": (
+                f"Output file already exists: {out_path} "
+                "(set allow_overwrite=True to overwrite)"
+            ),
         }
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -680,8 +709,13 @@ def filmcraft_video_basic(
                         "error": f"filmcraft-cli run error: {jsonl_err}",
                     }
 
-                # Optional post-scale if scale != 1.0 was requested on a standalone clip
-                if scale is not None and float(scale) > 0 and float(scale) != 1.0 and tmp_out.is_file():
+                # Scale standalone clip frames since only --project/--demo accept --scale.
+                if (
+                    scale is not None
+                    and float(scale) > 0
+                    and float(scale) != 1.0
+                    and tmp_out.is_file()
+                ):
                     with Image.open(tmp_out) as im:
                         new_w = max(1, int(round(im.width * float(scale))))
                         new_h = max(1, int(round(im.height * float(scale))))
@@ -689,13 +723,18 @@ def filmcraft_video_basic(
                         resized.save(tmp_out, format="PNG")
 
             frame_info = inspect_image(str(tmp_out))
-            if not frame_info.get("valid") or frame_info.get("width", 0) <= 0 or frame_info.get("height", 0) <= 0:
+            if (
+                not frame_info.get("valid")
+                or frame_info.get("width", 0) <= 0
+                or frame_info.get("height", 0) <= 0
+            ):
+                err_detail = frame_info.get("error", "invalid image")
                 return {
                     "ok": False,
                     "app": "filmcraft",
                     "action": "render_frame",
                     "command": cmd,
-                    "error": f"Rendered frame PNG failed verification: {frame_info.get('error', 'invalid image')}",
+                    "error": f"Rendered frame PNG failed verification: {err_detail}",
                 }
 
             if src_path is not None and sha256_file(src_path) != source_sha256:
@@ -703,14 +742,22 @@ def filmcraft_video_basic(
                     "ok": False,
                     "app": "filmcraft",
                     "action": "render_frame",
-                    "error": "non_destructive_violation: source file hash changed during render_frame",
+                    "error": (
+                        "non_destructive_violation: source file hash changed during render_frame"
+                    ),
                 }
-            if proj_path is not None and src_path is None and sha256_file(proj_path) != source_sha256:
+            if (
+                proj_path is not None
+                and src_path is None
+                and sha256_file(proj_path) != source_sha256
+            ):
                 return {
                     "ok": False,
                     "app": "filmcraft",
                     "action": "render_frame",
-                    "error": "non_destructive_violation: project file hash changed during render_frame",
+                    "error": (
+                        "non_destructive_violation: project file hash changed during render_frame"
+                    ),
                 }
 
             _atomic_promote(tmp_out, out_path, allow_overwrite=allow_overwrite)

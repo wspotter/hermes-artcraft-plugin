@@ -18,31 +18,31 @@ metadata:
       - filmcraft-basics
 ---
 
-# Recipe Maker Skill
+# Recipe Maker
 
-Design, prototype, verify, and save a new reusable ArtCraft recipe skill across `PhotoCraft`, `LightCraft`, `FilmCraft`, and `SoundCraft` using bundled `artcraft:recipe-*` skills as reference templates.
+Design, test, and save a reusable ArtCraft workflow skill across PhotoCraft, LightCraft, FilmCraft, and SoundCraft using the bundled `recipe-*` skills as templates.
 
 ## When to Use
 
-- Turning a multi-step photo development, restoration, print formatting, audio mastering, or video export sequence into a repeatable `recipe-<slug>` skill.
-- Capturing tuned slider ranges, safe parameter bounds, and Stop/Ask quality gates after an interactive editing session.
+- Turning a multi-step photo edit, restoration, print layout, audio conversion, or video export sequence into a repeatable `recipe-<slug>` skill.
+- Capturing tuned slider ranges, safe parameter bounds, and pause conditions after an interactive editing session.
 
 ## Prerequisites
 
-- ArtCraft CLI suite discoverable via `artcraft_status`.
-- At least one representative sample media file to test candidate steps non-destructively.
+- ArtCraft CLI binaries discoverable via `artcraft_status`.
+- At least one representative sample media file to test each step non-destructively.
 
 ## How to Run
 
 ### 1. Initialize a Prototype Job Workspace
 
 ```bash
-hermes artcraft job create --job-root <work_dir>/recipe_proto --source <work_dir>/sample.png
+hermes artcraft job init recipe_proto --workspace <work_dir> --source <work_dir>/sample.png
 ```
 
-Or invoke `artcraft_job` with `action="init"`, `job_dir="<work_dir>/recipe_proto"`, and `source_path="<work_dir>/sample.png"`.
+Or invoke `artcraft_job` with `action="init"`, `job_id="recipe_proto"`, `workspace_dir="<work_dir>"`, and `source_path="<work_dir>/sample.png"`.
 
-### 2. Validate the New Recipe Against Hermes Standards
+### 2. Validate Bundled Repo Skills (Plugin Contributors Only)
 
 ```bash
 python3 -m unittest tests/test_skill_standards.py -v
@@ -50,26 +50,21 @@ python3 -m unittest tests/test_skill_standards.py -v
 
 ## Procedure
 
-1. **Probe & Inspect**:
-   - Call `artcraft_status` (and `photocraft_run` or `lightcraft_run` when checking CLI flags) to confirm binary capabilities.
-   - Inspect the sample input first: call `artcraft_prepare_inspection` for photographs, `artcraft_audio_basic` with `action="info"` for audio, or `artcraft_video_basic` with `action="probe"` for video. Record the baseline metrics that trigger the recipe.
-2. **Prototype Non-Destructively**:
-   - Initialize a workspace with `artcraft_job(action="init")`.
-   - Test candidate steps (`artcraft_develop`, `artcraft_restore_step`, `photocraft_spot_heal`, `artcraft_prepare_print`, `artcraft_audio_basic`, `artcraft_video_basic`) writing each stage to a distinct disposable path in `<work_dir>/work/` while preserving `source_sha256`.
-   - Determine conservative default parameters and explicit safe bounds.
-3. **Verify Before/After Quality**:
-   - Run `artcraft_build_review` or `artcraft_verify_edit` (or audio/video stream checks) on the prototype output.
-   - Define concrete acceptance checks and explicit Stop/Ask thresholds (`status: "needs_decision"` or `status: "needs_clarification"`) where human review is required.
-4. **Author & Save the Recipe Skill**:
-   - Because bundled plugin skills (`artcraft:recipe-*`) are read-only at runtime, save newly created user recipes into the user's writable skills directory (`~/.hermes/skills/recipe-<slug>/SKILL.md` or `<workspace_dir>/skills/recipe-<slug>/SKILL.md`, or via `skill_manage`). Only write to `skills/recipe-<slug>/SKILL.md` inside the plugin repository when explicitly developing upstream plugin skills.
-   - Use the bundled `artcraft:recipe-*` skills as reference templates and follow this exact YAML frontmatter and six-section structure:
+1. Probe and inspect the sample input first. Call `artcraft_status` (plus `photocraft_run` or `lightcraft_run` with `["--help"]` when checking CLI flags), then inspect the input with `artcraft_prepare_inspection` (images), `artcraft_audio_basic` `action="info"` (audio), or `artcraft_video_basic` `action="probe"` (video). Record the baseline numbers that trigger the recipe.
+2. Prototype non-destructively in a job workspace (`artcraft_job` `action="init"`). Run candidate steps (`artcraft_develop`, `artcraft_restore_step`, `photocraft_spot_heal`, `artcraft_prepare_print`, `artcraft_audio_basic`, `artcraft_video_basic`) writing each stage to a new file under `<work_dir>/work/` while keeping `source_sha256` intact. Pick conservative defaults and clear safety bounds.
+3. Verify before/after quality with `artcraft_build_review` or `artcraft_verify_edit` (or audio/video stream checks), and write down when the recipe must stop and ask for confirmation (`status: "needs_decision"` or `status: "needs_clarification"`).
+4. Save the recipe skill to the right place:
+   - For your own personal recipes (bundled plugin skills are read-only at runtime), save to `~/.hermes/skills/recipe-<slug>/SKILL.md` (or `<workspace_dir>/skills/recipe-<slug>/SKILL.md`, or via `skill_manage`).
+   - Only write to `skills/recipe-<slug>/SKILL.md` inside this plugin repository when contributing a new bundled skill upstream.
+
+Use this frontmatter and six-section layout:
 
 ```markdown
 ---
 name: recipe-<slug>
 description: Short summary under sixty chars ending with a period.
 version: "0.1.0"
-author: "wspotter"
+author: "<your-handle>"
 license: "MIT"
 platforms: [linux, macos]
 metadata:
@@ -79,9 +74,9 @@ metadata:
     related_skills: [artcraft-router]
 ---
 
-# Recipe: <Title> Skill
+# Recipe: <Title>
 
-Brief overview of the workflow, tools invoked, and non-destructive guarantees.
+Brief overview of what the workflow does, which tools it calls, and how it protects originals.
 
 ## When to Use
 
@@ -101,24 +96,22 @@ Tool payload or paste-safe CLI invocation using `<work_dir>` placeholders.
 
 ## Pitfalls
 
-- Conditions that require stopping with `needs_decision` or `needs_clarification`.
+- Conditions that require pausing with `needs_decision` or `needs_clarification`.
 
 ## Verification
 
-- Post-edit visual crop checks, SHA-256 receipts, or stream validation rules.
+- Post-edit visual crop checks, SHA-256 verification, or stream validation rules.
 ```
 
-5. **Validate Standards**:
-   - Register `recipe-<slug>` in `skills/artcraft-router/SKILL.md`, `README.md`, and `EXPECTED_SKILLS` in `tests/test_skill_standards.py`.
-   - Run `python3 -m unittest tests/test_skill_standards.py -v` and confirm all checks pass.
+5. If contributing a bundled skill to this repository, set `author` to match the repo maintainer standards, register `recipe-<slug>` in `skills/artcraft-router/SKILL.md`, `README.md`, and `EXPECTED_SKILLS` in `tests/test_skill_standards.py`, and run `python3 -m unittest tests/test_skill_standards.py -v`.
 
 ## Pitfalls
 
-- Never hardcode machine-local paths, private hostnames, or temporary system paths in a recipe skill; always use `<work_dir>` placeholders.
+- Never hardcode machine-local paths, private hostnames, or system temp directory paths in a recipe skill; always use `<work_dir>` placeholders.
 - Keep `description` single-line, at most 60 characters, ending with a period, without repeating the skill name or marketing buzzwords.
-- Never place inline comments immediately after a backslash line continuation in shell code fences.
+- Never place inline `#` comments immediately after a backslash line continuation in shell fences, and avoid raw shell text/file commands in skill instructions.
 
 ## Verification
 
-- `python3 -m unittest tests/test_skill_standards.py -v` passes with zero errors.
-- Prototype run produces verified `source_sha256` and `output_sha256` receipts and clean review crops.
+- Personal recipes run cleanly on a fresh sample file, preserve `source_sha256`, and pass visual crop or stream checks.
+- Upstream repo contributions also pass `python3 -m unittest tests/test_skill_standards.py -v`.

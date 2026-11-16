@@ -2,17 +2,39 @@
 
 from __future__ import annotations
 
+import json
+import os
+import shutil
 import subprocess
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import Any, Dict, List, Optional, Sequence
 
 from .discovery import find_cli_binary
-from .verify import verify_edit
+from .verify import _validate_region, inspect_image, sha256_file, verify_edit
 
 
 def _paths_refer_to_same_file(path_a: Path, path_b: Path) -> bool:
     """Return True when two paths resolve to the same target location."""
-    return path_a.expanduser().resolve() == path_b.expanduser().resolve()
+    resolved_a = path_a.expanduser().resolve()
+    resolved_b = path_b.expanduser().resolve()
+    if resolved_a == resolved_b:
+        return True
+    try:
+        return os.path.samefile(resolved_a, resolved_b)
+    except OSError:
+        return False
+
+
+def atomic_replace_file(src: Path, dst: Path, *, allow_overwrite: bool = False) -> None:
+    """Atomically replace dst with src without following existing symlinks."""
+    dst_p = Path(dst).expanduser()
+    if os.path.lexists(dst_p) and not allow_overwrite:
+        raise FileExistsError(
+            f"Output path already exists: {dst_p} (set allow_overwrite=True to replace)"
+        )
+    dst_p.parent.mkdir(parents=True, exist_ok=True)
+    os.replace(str(src), str(dst_p))
 
 
 def run_artcraft_cli(
@@ -25,9 +47,26 @@ def run_artcraft_cli(
     expected_height: Optional[int] = None,
     region: Optional[Sequence[int]] = None,
     verify: bool = True,
+    allow_overwrite: bool = False,
     timeout_s: float = 120.0,
 ) -> Dict[str, Any]:
     """Execute an ArtCraft CLI command with non-destructive guards and optional verification."""
+    out_p: Optional[Path] = Path(output_path).expanduser() if output_path else None
+    if out_p is not None:
+        if input_path and _paths_refer_to_same_file(Path(input_path), out_p):
+            return {
+                "ok": False,
+                "error": "non_destructive_guard: output_path must be distinct from input_path",
+            }
+        if os.path.lexists(out_p) and not allow_overwrite:
+            return {
+                "ok": False,
+                "error": (
+                    f"non_destructive_guard: output_path already exists: {out_p} "
+                    "(set allow_overwrite=True to overwrite)"
+                ),
+            }
+
     binary = find_cli_binary(app)
     if binary is None:
         return {
@@ -35,14 +74,8 @@ def run_artcraft_cli(
             "error": f"{app}-cli binary not found on PATH or standard ArtCraft locations",
         }
 
-    if input_path and output_path and _paths_refer_to_same_file(Path(input_path), Path(output_path)):
-        return {
-            "ok": False,
-            "error": "non_destructive_guard: output_path must be distinct from input_path",
-        }
-
-    if output_path:
-        Path(output_path).expanduser().parent.mkdir(parents=True, exist_ok=True)
+    if out_p is not None:
+        out_p.parent.mkdir(parents=True, exist_ok=True)
 
     cmd: List[str] = [str(binary), *[str(a) for a in cli_args]]
     try:
@@ -103,16 +136,14 @@ def spot_heal(
     timeout_s: float = 120.0,
 ) -> dict:
     """Heal a visible defect and publish a new PNG only after verification."""
-    import json
-    import os
-    import shutil
-    from tempfile import TemporaryDirectory
-
-    from .verify import _validate_region, inspect_image, sha256_file
-
     source = Path(input_path).expanduser().resolve(strict=True)
-    target = Path(output_path).expanduser().absolute()
-    if target.suffix.lower() != ".png" or os.path.lexists(target) or not target.parent.is_dir():
+    target = Path(os.path.abspath(Path(output_path).expanduser()))
+    if (
+        _paths_refer_to_same_file(source, target)
+        or target.suffix.lower() != ".png"
+        or os.path.lexists(target)
+        or not target.parent.is_dir()
+    ):
         raise ValueError("output_path must name a new PNG in an existing directory")
     info = inspect_image(str(source))
     if not info.get("valid"):
@@ -148,12 +179,20 @@ def spot_heal(
             timeout_s=timeout_s,
         )
         if not result["ok"]:
-            return {"ok": False, "error": result["error"], "stderr": result.get("stderr", "")[-1000:]}
+            return {
+                "ok": False,
+                "error": result["error"],
+                "stderr": result.get("stderr", "")[-1000:],
+            }
         verification = result["verification"]
         diff = verification["pixel_diff"]
         outside = diff["changed_pixels"] - diff["region"]["changed_pixels"]
         if outside:
-            return {"ok": False, "error": "pixels_changed_outside_region", "outside_pixels": outside}
+            return {
+                "ok": False,
+                "error": "pixels_changed_outside_region",
+                "outside_pixels": outside,
+            }
         if sha256_file(source) != info["sha256"]:
             raise ValueError("source changed during the edit")
         if verification["output"]["format"] != "PNG":

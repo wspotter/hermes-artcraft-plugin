@@ -7,6 +7,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+
 from PIL import Image
 
 from artcraft_plugin import mcp_server
@@ -96,6 +97,8 @@ class TestArtCraftMcpServer(unittest.TestCase):
         payload = json.loads(content[0]["text"])
         self.assertTrue(payload["ok"])
         self.assertIn("apps", payload)
+        self.assertIn("capabilities", payload)
+        self.assertIn("available_tools", payload["capabilities"])
 
     def test_tools_call_inspect(self) -> None:
         img_path = self.test_dir / "sample.png"
@@ -139,7 +142,9 @@ class TestArtCraftMcpServer(unittest.TestCase):
 
     def test_stdio_pipeline_stream(self) -> None:
         req1 = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "ping"}).encode("utf-8") + b"\n"
-        req2 = json.dumps({"jsonrpc": "2.0", "id": 2, "method": "tools/list"}).encode("utf-8") + b"\n"
+        req2 = (
+            json.dumps({"jsonrpc": "2.0", "id": 2, "method": "tools/list"}).encode("utf-8") + b"\n"
+        )
         in_stream = io.BytesIO(req1 + req2)
         out_stream = io.BytesIO()
 
@@ -163,6 +168,41 @@ class TestArtCraftMcpServer(unittest.TestCase):
         self.assertIsNotNone(msg)
         self.assertEqual(msg["id"], "cl-1")
         self.assertEqual(msg["method"], "ping")
+
+    def test_content_length_rejects_invalid_and_oversized_and_truncated(self) -> None:
+        valid_payload = json.dumps({"jsonrpc": "2.0", "id": "bad", "method": "ping"}).encode(
+            "utf-8"
+        )
+
+        # Negative Content-Length must not fall back to stream.read(-1)
+        neg_raw = b"Content-Length: -1\r\n\r\n" + valid_payload
+        self.assertIsNone(mcp_server.read_message(io.BytesIO(neg_raw)))
+
+        # Zero Content-Length must return None
+        zero_raw = b"Content-Length: 0\r\n\r\n"
+        self.assertIsNone(mcp_server.read_message(io.BytesIO(zero_raw)))
+
+        # Oversized Content-Length must return None before reading body
+        class _FailReadStream:
+            def __init__(self, header: bytes) -> None:
+                self._buf = io.BytesIO(header)
+
+            def readline(self, limit: int = -1) -> bytes:
+                return self._buf.readline(limit)
+
+            def read(self, size: int = -1) -> bytes:
+                raise AssertionError(
+                    f"stream.read({size}) should not be called for oversized frame"
+                )
+
+        oversized = mcp_server.MAX_MESSAGE_BYTES + 1
+        header = f"Content-Length: {oversized}\r\n\r\n".encode()
+        self.assertIsNone(mcp_server.read_message(_FailReadStream(header)))
+
+        # Truncated body (even if valid JSON prefix) must return None
+        truncated_json = b'{"a":1}'
+        trunc_raw = f"Content-Length: {len(truncated_json) + 20}\r\n\r\n".encode() + truncated_json
+        self.assertIsNone(mcp_server.read_message(io.BytesIO(trunc_raw)))
 
     def test_tools_call_missing_input_sets_is_error_true(self) -> None:
         req = {
@@ -223,7 +263,8 @@ class TestArtCraftMcpServer(unittest.TestCase):
         }
         resp_c = mcp_server.process_message(req_clarify)
         self.assertFalse(resp_c["result"]["isError"])
-        self.assertEqual(json.loads(resp_c["result"]["content"][0]["text"])["status"], "needs_clarification")
+        clarify_payload = json.loads(resp_c["result"]["content"][0]["text"])
+        self.assertEqual(clarify_payload["status"], "needs_clarification")
 
         # 2. Quality assessment rejecting a no-op output -> isError=False
         same_out = self.test_dir / "same_out.png"
@@ -237,7 +278,7 @@ class TestArtCraftMcpServer(unittest.TestCase):
                 "arguments": {
                     "source_path": str(src),
                     "output_path": str(same_out),
-                    "work_dir": str(self.test_dir / "rev"),
+                    "working_dir": str(self.test_dir / "rev"),
                     "region": [10, 10, 40, 40],
                 },
             },
@@ -248,3 +289,24 @@ class TestArtCraftMcpServer(unittest.TestCase):
         self.assertFalse(rev_payload["passed"])
         flag_ids = [f["id"] for f in rev_payload["flags"]]
         self.assertIn("untouched_scratch", flag_ids)
+
+    def test_tools_call_rejects_non_object_params_or_arguments(self) -> None:
+        bad_params_req = {
+            "jsonrpc": "2.0",
+            "id": "bad-params",
+            "method": "tools/call",
+            "params": ["artcraft_status"],
+        }
+        resp_p = mcp_server.process_message(bad_params_req)
+        self.assertIsNotNone(resp_p)
+        self.assertEqual(resp_p["error"]["code"], -32602)
+
+        bad_args_req = {
+            "jsonrpc": "2.0",
+            "id": "bad-args",
+            "method": "tools/call",
+            "params": {"name": "artcraft_status", "arguments": ["bad"]},
+        }
+        resp_a = mcp_server.process_message(bad_args_req)
+        self.assertIsNotNone(resp_a)
+        self.assertEqual(resp_a["error"]["code"], -32602)

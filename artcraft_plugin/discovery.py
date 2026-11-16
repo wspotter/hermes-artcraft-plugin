@@ -7,7 +7,7 @@ import shutil
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 ARTCRAFT_APPS: Dict[str, tuple[str, ...]] = {
     "photocraft": ("photocraft-cli", "photocraft"),
@@ -130,3 +130,113 @@ def discover_all(extra_dirs: Optional[List[Path]] = None) -> Dict[str, BinaryInf
                 available=True,
             )
     return results
+
+
+_STANDALONE_PILLOW_TOOLS: tuple[str, ...] = (
+    "artcraft_inspect",
+    "artcraft_prepare_inspection",
+    "artcraft_prepare_print",
+    "artcraft_verify_edit",
+    "artcraft_checkpoint",
+    "artcraft_build_review",
+    "artcraft_job",
+)
+
+_RESTORE_RECIPES: tuple[str, ...] = (
+    "faded_tones",
+    "color_cast",
+    "dust_and_scratches",
+    "noise_and_grain",
+    "sharpening",
+    "enlargement",
+)
+
+_CLI_TOOL_MAP: Dict[str, tuple[str, ...]] = {
+    "photocraft": ("photocraft_run", "photocraft_spot_heal", "artcraft_restore_step"),
+    "lightcraft": ("lightcraft_run", "artcraft_develop"),
+    "filmcraft": ("artcraft_video_basic",),
+    "soundcraft": ("artcraft_audio_basic",),
+}
+
+
+def _has_pillow() -> bool:
+    try:
+        import PIL  # noqa: F401
+        return True
+    except Exception:
+        return False
+
+
+def summarize_capabilities(
+    discovered: Dict[str, BinaryInfo],
+    *,
+    pillow_available: Optional[bool] = None,
+) -> Dict[str, Any]:
+    """Summarize which tools run standalone with Pillow vs require ArtCraft CLIs."""
+    has_pil = _has_pillow() if pillow_available is None else pillow_available
+    available_tools: List[str] = ["artcraft_status"]
+    unavailable_tools: Dict[str, str] = {}
+
+    standalone_tools = ["artcraft_status"]
+    for tool_name in _STANDALONE_PILLOW_TOOLS:
+        standalone_tools.append(tool_name)
+        if has_pil:
+            available_tools.append(tool_name)
+        else:
+            unavailable_tools[tool_name] = "Requires Pillow (PIL)"
+
+    photocraft_ok = bool(discovered.get("photocraft") and discovered["photocraft"].available)
+    restore_ok = has_pil and photocraft_ok
+
+    cli_tools: Dict[str, Dict[str, Any]] = {}
+    for app, tool_names in _CLI_TOOL_MAP.items():
+        info = discovered.get(app)
+        app_ok = bool(info and info.available)
+        cli_tools[app] = {
+            "available": app_ok,
+            "tools": list(tool_names),
+        }
+        binary_label = info.binary_name if info else f"{app}-cli"
+        for tool_name in tool_names:
+            if tool_name == "artcraft_restore_step":
+                if restore_ok:
+                    available_tools.append(tool_name)
+                elif not app_ok:
+                    unavailable_tools[tool_name] = f"Requires {binary_label} (not found)"
+                else:
+                    unavailable_tools[tool_name] = "Requires Pillow (PIL)"
+            elif app_ok:
+                available_tools.append(tool_name)
+            else:
+                unavailable_tools[tool_name] = f"Requires {binary_label} (not found)"
+
+    return {
+        "pillow_available": has_pil,
+        "standalone_tools": standalone_tools,
+        "partial_tools": {
+            "artcraft_restore_step": {
+                "available": restore_ok,
+                "standalone_recipes": [],
+                "cli_recipes": {
+                    recipe: {
+                        "requires_app": "photocraft",
+                        "available": restore_ok,
+                    }
+                    for recipe in _RESTORE_RECIPES
+                },
+            }
+        },
+        "cli_tools": cli_tools,
+        "available_tools": sorted(available_tools),
+        "unavailable_tools": unavailable_tools,
+    }
+
+
+def status_payload(extra_dirs: Optional[List[Path]] = None) -> Dict[str, Any]:
+    """Return full ArtCraft discovery and tool capability payload."""
+    discovered = discover_all(extra_dirs=extra_dirs)
+    return {
+        "ok": True,
+        "apps": {name: info.to_dict() for name, info in discovered.items()},
+        "capabilities": summarize_capabilities(discovered),
+    }

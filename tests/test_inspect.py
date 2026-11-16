@@ -7,13 +7,17 @@ import io
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from PIL import Image, ImageCms
 
+from artcraft_plugin import review
 from artcraft_plugin.cli import _cmd_inspect
 from artcraft_plugin.inspect import (
     MEASUREMENT_LIMITS,
     compute_effective_ppi,
+    compute_laplacian,
+    compute_laplacian_variance,
     compute_measured_clues,
     determine_aspect_ratio,
     determine_orientation,
@@ -77,7 +81,9 @@ class TestInspect(unittest.TestCase):
         self.assertTrue(eleven_fourteen["crop_needed_for_borderless"])
 
         # Custom requested target print size
-        custom = compute_effective_ppi(1200, 1600, target_sizes=[{"name": "wallet", "w": 2.5, "h": 3.5}])
+        custom = compute_effective_ppi(
+            1200, 1600, target_sizes=[{"name": "wallet", "w": 2.5, "h": 3.5}]
+        )
         self.assertEqual(len(custom), 1)
         self.assertEqual(custom[0]["target_name"], "wallet")
 
@@ -265,11 +271,55 @@ class TestInspect(unittest.TestCase):
             )
             # Run _cmd_inspect with stdout suppressed
             buf = io.StringIO()
-            with unittest.mock.patch("sys.stdout", buf):
+            with patch("sys.stdout", buf):
                 exit_code = _cmd_inspect(args)
             self.assertEqual(exit_code, 0)
             self.assertTrue(work.exists())
             self.assertTrue((work / "preview_test.png").exists())
+
+    def test_cli_inspect_rejects_non_positive_sizes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            img_p = root / "test.png"
+            Image.new("RGB", (64, 64), "blue").save(img_p)
+
+            for preview_max, crop_size in [(0, 30), (50, -5)]:
+                args = argparse.Namespace(
+                    path=str(img_p),
+                    working_dir=str(root / "work"),
+                    preview_max=preview_max,
+                    crop_size=crop_size,
+                )
+                buf = io.StringIO()
+                with patch("sys.stdout", buf):
+                    exit_code = _cmd_inspect(args)
+                self.assertEqual(exit_code, 1)
+
+    def test_shared_laplacian_and_preview_helpers(self) -> None:
+        tiny = Image.new("L", (2, 2), 100)
+        self.assertIsNone(compute_laplacian(tiny))
+        self.assertEqual(compute_laplacian_variance(tiny), 0.0)
+
+        sharp = Image.new("L", (32, 32), 100)
+        for y in range(0, 32, 2):
+            for x in range(0, 32, 2):
+                sharp.putpixel((x, y), 240)
+        lap_var = compute_laplacian_variance(sharp)
+        clues = compute_measured_clues(sharp)
+        self.assertEqual(round(lap_var, 2), clues["sharpness"]["score"])
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            wide = Image.new("RGB", (400, 200), (10, 20, 30))
+            p_inspect = root / "inspect_preview.png"
+            p_review = root / "review_preview.png"
+            inspect_res = generate_preview(wide, p_inspect, max_dimension=100)
+            review_res = review.generate_preview(wide, p_review, max_dim=100)
+            self.assertIsInstance(inspect_res, dict)
+            self.assertIsInstance(review_res, tuple)
+            self.assertEqual(review_res, (inspect_res["width"], inspect_res["height"]))
+            self.assertEqual(review_res, (100, 50))
+            self.assertEqual(review.generate_preview(wide, p_review, max_dim=0), (400, 200))
 
 
 if __name__ == "__main__":

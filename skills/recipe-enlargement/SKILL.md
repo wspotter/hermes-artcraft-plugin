@@ -12,18 +12,18 @@ metadata:
     related_skills: [photo-restoration, print-preparation, recipe-sharpening]
 ---
 
-# Recipe: Enlargement Skill
+# Recipe: Enlargement
 
-Upscale low-resolution photographs proportionally with detail-preserving interpolation and restrained output sharpening using `artcraft_restore_step` (`recipe="enlargement"`).
+Upscale low-resolution photographs proportionally with detail-preserving resampling and mild output sharpening using `artcraft_restore_step` (`recipe="enlargement"`).
 
 ## When to Use
 
-- Effective source resolution (`effective_source_ppi`) is below the target print resolution (for example, 100 PPI instead of 300 PPI at the requested print size).
+- Effective source resolution (`effective_source_ppi`) is below the target print resolution (for example, 100 PPI instead of 300 PPI at the requested sheet size).
 
 ## Prerequisites
 
 - `photocraft-cli` discoverable via `artcraft_status`.
-- Target print dimensions and source resolution verified via `artcraft_prepare_inspection`.
+- Target print size and source dimensions checked via `artcraft_prepare_inspection`.
 
 ## How to Run
 
@@ -35,29 +35,29 @@ Upscale low-resolution photographs proportionally with detail-preserving interpo
   "output_path": "<work_dir>/work/step_enlarged.png",
   "recipe": "enlargement",
   "parameters": {
-    "width": 2400,
-    "height": 3000,
+    "scale": 2.0,
     "resample": "preserveDetails",
     "sharpen_amount": 40,
-    "sharpen_radius": 0.8,
-    "sharpen_threshold": 1
+    "sharpen_radius": 0.8
   },
   "checkpoint_dir": "<work_dir>/checkpoints",
   "step_name": "06_enlargement"
 }
 ```
 
+Note: You can pass `scale` (checked against the `> 4.0x` guard) or explicit `width` / `height` pixels.
+
 ## Procedure
 
-1. Compute target `width` and `height` at the exact source aspect ratio (within 0.1%) using scale factors between `1.1x` and `3.0x` (safe maximum `4.0x`).
-2. Use `resample: "preserveDetails"` (or `"bicubicSmoother"`) paired with restrained output sharpening (`amount` `30..50`, `radius` `0.6..1.0`, `threshold` `1`).
-3. Inspect both 1:1 native crops and simulated print-scale crops to confirm clean edge transitions.
+1. Choose a proportional `scale` between `1.1` and `3.0` (safe maximum `4.0`), or compute `width` and `height` matching the exact source aspect ratio.
+2. Use `resample: "preserveDetails"` (or `"bicubicSmoother"`) with restrained output sharpening (`sharpen_amount` `30..50`, `sharpen_radius` `0.6..1.0`).
+3. Inspect both 1:1 native crops and print-scale crops in `checkpoint_dir` to check edge smoothness and noise.
 
 ## Pitfalls
 
-- Stop and return `status: "needs_decision"` if the requested scale factor exceeds `4.0x` or if target dimensions would alter the source aspect ratio.
-- Never use generative super-resolution that hallucinates synthetic facial details or fictional text.
+- `artcraft_restore_step` stops and returns `status: "needs_decision"` if `parameters.scale > 4.0`. Also stop and check with the user if target dimensions would stretch the aspect ratio.
+- Never use generative upscaling that invents facial features or fictional lettering.
 
 ## Verification
 
-- Verify `output_path` decodes to the exact target `width` and `height`, preserves source aspect ratio, and passes `artcraft_build_review`.
+- Confirm `output_path` decodes to the expected `width` and `height`, preserves source proportions, and passes `artcraft_build_review` (`--no-preserve-framing` is not needed when aspect ratio stays identical).

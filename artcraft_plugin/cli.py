@@ -7,14 +7,14 @@ import json
 import sys
 from typing import Any
 
-from .discovery import discover_all
+from .discovery import status_payload
 from .inspect import prepare_inspection
 from .jobs import (
     get_job,
     init_job,
+    reconcile_delivery,
     record_delivery,
     record_export_artifact,
-    reconcile_delivery,
     resume_job,
     save_checkpoint,
 )
@@ -29,33 +29,52 @@ from .suite_basics import (
 from .verify import verify_edit
 
 
+def _require_positive(value: float | int, flag: str) -> None:
+    if value <= 0:
+        raise ValueError(f"{flag} must be positive")
+
+
 def _cmd_doctor(_args: argparse.Namespace) -> int:
-    discovered = discover_all()
-    print(json.dumps({k: v.to_dict() for k, v in discovered.items()}, indent=2))
-    return 0 if any(info.available for info in discovered.values()) else 1
+    payload = status_payload()
+    print(json.dumps(payload, indent=2))
+    return 0 if any(info.get("available") for info in payload["apps"].values()) else 1
 
 
 def _cmd_verify(args: argparse.Namespace) -> int:
-    result = verify_edit(
-        args.input_path,
-        args.output_path,
-        expected_width=args.width,
-        expected_height=args.height,
-        region=args.region,
-    )
-    print(json.dumps(result, indent=2))
-    return 0 if result.get("passed") else 1
+    try:
+        if args.width is not None:
+            _require_positive(args.width, "--width")
+        if args.height is not None:
+            _require_positive(args.height, "--height")
+        result = verify_edit(
+            args.input_path,
+            args.output_path,
+            expected_width=args.width,
+            expected_height=args.height,
+            region=args.region,
+        )
+        print(json.dumps(result, indent=2))
+        return 0 if result.get("passed") else 1
+    except Exception as exc:
+        print(json.dumps({"passed": False, "error": str(exc)}, indent=2))
+        return 1
 
 
 def _cmd_inspect(args: argparse.Namespace) -> int:
-    result = prepare_inspection(
-        args.path,
-        working_dir=args.working_dir,
-        max_preview_dimension=args.preview_max,
-        crop_size=args.crop_size,
-    )
-    print(json.dumps(result, indent=2))
-    return 0 if result.get("valid") else 1
+    try:
+        _require_positive(args.preview_max, "--preview-max")
+        _require_positive(args.crop_size, "--crop-size")
+        result = prepare_inspection(
+            args.path,
+            working_dir=args.working_dir,
+            max_preview_dimension=args.preview_max,
+            crop_size=args.crop_size,
+        )
+        print(json.dumps(result, indent=2))
+        return 0 if result.get("valid") else 1
+    except Exception as exc:
+        print(json.dumps({"ok": False, "valid": False, "error": str(exc)}, indent=2))
+        return 1
 
 
 def _cmd_prep_print(args: argparse.Namespace) -> int:
@@ -75,13 +94,13 @@ def _cmd_prep_print(args: argparse.Namespace) -> int:
             allow_upscale=args.allow_upscale,
             target_icc=args.target_icc,
             preview_path=args.preview_path,
+            allow_overwrite=bool(getattr(args, "allow_overwrite", False)),
         )
         print(json.dumps(result, indent=2))
         return 0 if (result.get("ok") or result.get("status") == "needs_clarification") else 1
     except Exception as exc:
         print(json.dumps({"ok": False, "error": str(exc)}, indent=2))
         return 1
-
 
 
 def _cmd_restore(args: argparse.Namespace) -> int:
@@ -92,6 +111,7 @@ def _cmd_restore(args: argparse.Namespace) -> int:
         return 1
 
     try:
+        _require_positive(args.ppi, "--ppi")
         result = restore_step(
             input_path=args.input_path,
             output_path=args.output_path,
@@ -107,7 +127,7 @@ def _cmd_restore(args: argparse.Namespace) -> int:
         )
         print(json.dumps(result, indent=2))
         if result.get("status") == "needs_decision":
-            return 2  # Special exit code for stop/ask gate
+            return 2  # Operator confirmation required
         return 0 if result.get("ok") else 1
     except Exception as exc:
         print(json.dumps({"ok": False, "error": str(exc)}, indent=2))
@@ -140,6 +160,10 @@ def _cmd_checkpoint(args: argparse.Namespace) -> int:
 
 def _cmd_review(args: argparse.Namespace) -> int:
     try:
+        _require_positive(args.preview_max, "--preview-max")
+        _require_positive(args.crop_size, "--crop-size")
+        if args.retry_count < 0 or args.max_retries < 0:
+            raise ValueError("--retry-count and --max-retries must be non-negative")
         regions = None
         if getattr(args, "regions", None):
             regions = json.loads(args.regions)
@@ -175,7 +199,12 @@ def _cmd_job(args: argparse.Namespace) -> int:
 
         if action == "init":
             meta = json.loads(args.meta) if getattr(args, "meta", None) else None
-            res = init_job(job_id=job_id, source_path=getattr(args, "source", None), workspace_dir=workspace_dir, metadata=meta)
+            res = init_job(
+                job_id=job_id,
+                source_path=getattr(args, "source", None),
+                workspace_dir=workspace_dir,
+                metadata=meta,
+            )
             print(json.dumps({"ok": True, "job": res}, indent=2))
             return 0
         elif action == "checkpoint":
@@ -326,7 +355,7 @@ def _cmd_video(args: argparse.Namespace) -> int:
 
 
 def register_cli(subparser: argparse.ArgumentParser) -> None:
-    """Wire `doctor`, `verify`, and `inspect` subcommands onto a parent argparse subparser."""
+    """Register artcraft CLI subcommands on subparser."""
     sub = subparser.add_subparsers(dest="artcraft_cmd", required=True)
 
     doctor = sub.add_parser("doctor", help="Check installed ArtCraft CLI binaries")
@@ -347,42 +376,146 @@ def register_cli(subparser: argparse.ArgumentParser) -> None:
     )
     verify.set_defaults(func=_cmd_verify)
 
-    inspect_cmd = sub.add_parser("inspect", help="Prepare preview, crops, and measured clues for visual inspection")
+    inspect_cmd = sub.add_parser(
+        "inspect",
+        help="Prepare preview, crops, and image metrics for visual inspection",
+    )
     inspect_cmd.add_argument("path", help="Path to source image")
-    inspect_cmd.add_argument("--working-dir", default=None, help="Directory to save preview and crops")
-    inspect_cmd.add_argument("--preview-max", type=int, default=1024, help="Maximum preview dimension (default 1024)")
-    inspect_cmd.add_argument("--crop-size", type=int, default=256, help="Pixel size for native crops (default 256)")
+    inspect_cmd.add_argument(
+        "--working-dir", default=None, help="Directory to save preview and crops"
+    )
+    inspect_cmd.add_argument(
+        "--preview-max",
+        type=int,
+        default=1024,
+        help="Maximum preview dimension (default 1024)",
+    )
+    inspect_cmd.add_argument(
+        "--crop-size",
+        type=int,
+        default=256,
+        help="Pixel size for native crops (default 256)",
+    )
     inspect_cmd.set_defaults(func=_cmd_inspect)
 
-    prep_cmd = sub.add_parser("prep-print", help="Prepare a verified print delivery file")
+    prep_cmd = sub.add_parser("prep-print", help="Prepare a print-ready output file")
     prep_cmd.add_argument("input_path", help="Path to source image")
     prep_cmd.add_argument("output_path", help="Path to destination print file")
-    prep_cmd.add_argument("--width", type=float, required=True, dest="width_in", help="Target print width in inches")
-    prep_cmd.add_argument("--height", type=float, required=True, dest="height_in", help="Target print height in inches")
-    prep_cmd.add_argument("--orientation", choices=["auto", "portrait", "landscape"], default="auto", help="Print orientation (default auto)")
-    prep_cmd.add_argument("--fit-mode", choices=["auto", "borderless", "crop", "margins", "fit"], default="auto", help="Fit mode (default auto)")
-    prep_cmd.add_argument("--confirm-crop", action="store_true", default=False, help="Confirm cropping if aspect ratio conflicts")
+    prep_cmd.add_argument(
+        "--width",
+        type=float,
+        required=True,
+        dest="width_in",
+        help="Target print width in inches",
+    )
+    prep_cmd.add_argument(
+        "--height",
+        type=float,
+        required=True,
+        dest="height_in",
+        help="Target print height in inches",
+    )
+    prep_cmd.add_argument(
+        "--orientation",
+        choices=["auto", "portrait", "landscape"],
+        default="auto",
+        help="Print orientation (default auto)",
+    )
+    prep_cmd.add_argument(
+        "--fit-mode",
+        choices=["auto", "borderless", "crop", "margins", "fit"],
+        default="auto",
+        help="Fit mode (default auto)",
+    )
+    prep_cmd.add_argument(
+        "--confirm-crop",
+        action="store_true",
+        default=False,
+        help="Confirm cropping if aspect ratio conflicts",
+    )
     prep_cmd.add_argument("--ppi", type=int, default=300, help="Target export PPI (default 300)")
-    prep_cmd.add_argument("--format", dest="output_format", choices=["auto", "PNG", "TIFF", "JPEG"], default="auto", help="Output format (default auto)")
-    prep_cmd.add_argument("--margin-color", default="white", help="Margin color for fit mode (default white)")
-    prep_cmd.add_argument("--preserve-master", dest="preserve_master_path", default=None, help="Path to preserve master copy")
-    prep_cmd.add_argument("--allow-upscale", action="store_true", default=False, help="Allow upscaling small images")
-    prep_cmd.add_argument("--target-icc", default=None, help="Target ICC profile path or 'sRGB'")
-    prep_cmd.add_argument("--preview-path", default=None, help="Explicit path for preview image")
+    prep_cmd.add_argument(
+        "--format",
+        dest="output_format",
+        choices=["auto", "PNG", "TIFF", "JPEG"],
+        default="auto",
+        help="Output format (default auto)",
+    )
+    prep_cmd.add_argument(
+        "--margin-color", default="white", help="Margin color for fit mode (default white)"
+    )
+    prep_cmd.add_argument(
+        "--preserve-master",
+        dest="preserve_master_path",
+        default=None,
+        help="Path to preserve master copy",
+    )
+    prep_cmd.add_argument(
+        "--allow-upscale",
+        action="store_true",
+        default=False,
+        help="Allow upscaling small images",
+    )
+    prep_cmd.add_argument(
+        "--target-icc", default=None, help="Target ICC profile path or 'sRGB'"
+    )
+    prep_cmd.add_argument(
+        "--preview-path", default=None, help="Explicit path for preview image"
+    )
+    prep_cmd.add_argument(
+        "--allow-overwrite",
+        action="store_true",
+        default=False,
+        help="Allow overwriting existing output",
+    )
     prep_cmd.set_defaults(func=_cmd_prep_print)
 
-    restore_cmd = sub.add_parser("restore", help="Apply a restoration recipe with checkpointing and crops")
-    restore_cmd.add_argument("recipe", choices=["faded_tones", "color_cast", "dust_and_scratches", "noise_and_grain", "sharpening", "enlargement"], help="Restoration recipe")
+    restore_cmd = sub.add_parser(
+        "restore", help="Apply a restoration recipe with checkpointing and crops"
+    )
+    restore_cmd.add_argument(
+        "recipe",
+        choices=[
+            "faded_tones",
+            "color_cast",
+            "dust_and_scratches",
+            "noise_and_grain",
+            "sharpening",
+            "enlargement",
+        ],
+        help="Restoration recipe",
+    )
     restore_cmd.add_argument("input_path", help="Path to input photo")
     restore_cmd.add_argument("output_path", help="Path to output photo")
     restore_cmd.add_argument("--params", default=None, help="JSON-encoded recipe parameters")
-    restore_cmd.add_argument("--region", type=int, nargs=4, metavar=("X", "Y", "W", "H"), default=None, help="Optional [x y w h] region")
+    restore_cmd.add_argument(
+        "--region",
+        type=int,
+        nargs=4,
+        metavar=("X", "Y", "W", "H"),
+        default=None,
+        help="Optional [x y w h] region",
+    )
     restore_cmd.add_argument("--checkpoint-dir", default=None, help="Checkpoint directory")
     restore_cmd.add_argument("--step-name", default=None, help="Custom step name")
-    restore_cmd.add_argument("--ppi", type=int, default=300, help="Target print resolution PPI (default 300)")
-    restore_cmd.add_argument("--reconstruct-missing", action="store_true", default=False, help="Reconstruct missing features (Stop/Ask gate)")
-    restore_cmd.add_argument("--content-type", default=None, help="Content type hint (e.g. missing_face)")
-    restore_cmd.add_argument("--allow-overwrite", action="store_true", default=False, help="Allow overwriting output")
+    restore_cmd.add_argument(
+        "--ppi", type=int, default=300, help="Target print resolution PPI (default 300)"
+    )
+    restore_cmd.add_argument(
+        "--reconstruct-missing",
+        action="store_true",
+        default=False,
+        help="Reconstruct missing features (requires confirmation)",
+    )
+    restore_cmd.add_argument(
+        "--content-type", default=None, help="Content type hint (e.g. missing_face)"
+    )
+    restore_cmd.add_argument(
+        "--allow-overwrite",
+        action="store_true",
+        default=False,
+        help="Allow overwriting output",
+    )
     restore_cmd.set_defaults(func=_cmd_restore)
 
     cp_cmd = sub.add_parser("checkpoint", help="Manage restoration checkpoints")
@@ -391,25 +524,62 @@ def register_cli(subparser: argparse.ArgumentParser) -> None:
     cp_cmd.add_argument("--step-id", default=None, help="Step index or name for get action")
     cp_cmd.set_defaults(func=_cmd_checkpoint)
 
-    # Phase 5: Review Package & Quality Traps
-    rev_cmd = sub.add_parser("review", help="Build review package and test for defect traps")
+    # Edit review
+    rev_cmd = sub.add_parser("review", help="Build a review package and run defect checks")
     rev_cmd.add_argument("source_path", help="Path to original source photo")
     rev_cmd.add_argument("output_path", help="Path to edited output photo")
     rev_cmd.add_argument("--working-dir", default=None, help="Directory to save previews and crops")
-    rev_cmd.add_argument("--region", type=int, nargs=4, metavar=("X", "Y", "W", "H"), default=None, help="Target repair region [x y w h]")
-    rev_cmd.add_argument("--regions", default=None, help="JSON-encoded list of repair regions [[x,y,w,h], ...]")
-    rev_cmd.add_argument("--preview-max", type=int, default=1024, help="Max preview dimension in pixels (default 1024)")
-    rev_cmd.add_argument("--crop-size", type=int, default=256, help="Native crop dimension in pixels (default 256)")
-    rev_cmd.add_argument("--crop-geometry", type=json.loads, help="JSON crop rect or quad in source pixels")
-    rev_cmd.add_argument("--expected-aspect", default=None, help="Optional expected aspect ratio (e.g. '4:5' or 0.8)")
-    rev_cmd.add_argument("--no-preserve-framing", action="store_false", dest="preserve_framing", default=True, help="Allow aspect/framing shift from source")
+    rev_cmd.add_argument(
+        "--region",
+        type=int,
+        nargs=4,
+        metavar=("X", "Y", "W", "H"),
+        default=None,
+        help="Target repair region [x y w h]",
+    )
+    rev_cmd.add_argument(
+        "--regions",
+        default=None,
+        help="JSON-encoded list of repair regions [[x,y,w,h], ...]",
+    )
+    rev_cmd.add_argument(
+        "--preview-max",
+        type=int,
+        default=1024,
+        help="Max preview dimension in pixels (default 1024)",
+    )
+    rev_cmd.add_argument(
+        "--crop-size",
+        type=int,
+        default=256,
+        help="Native crop dimension in pixels (default 256)",
+    )
+    rev_cmd.add_argument(
+        "--crop-geometry",
+        type=json.loads,
+        help="JSON crop rect or quad in source pixels",
+    )
+    rev_cmd.add_argument(
+        "--expected-aspect",
+        default=None,
+        help="Optional expected aspect ratio (e.g. '4:5' or 0.8)",
+    )
+    rev_cmd.add_argument(
+        "--no-preserve-framing",
+        action="store_false",
+        dest="preserve_framing",
+        default=True,
+        help="Allow aspect/framing shift from source",
+    )
     rev_cmd.add_argument("--retry-count", type=int, default=0, help="Current retry count")
     rev_cmd.add_argument("--max-retries", type=int, default=3, help="Max retry limit")
     rev_cmd.add_argument("--last-checkpoint", default=None, help="Path to last verified checkpoint")
     rev_cmd.set_defaults(func=_cmd_review)
 
-    # Phase 6: Job Workspaces, Checkpoints & Delivery Receipts
-    job_cmd = sub.add_parser("job", help="Manage deterministic job workspaces and delivery receipts")
+    # Job workspaces and delivery tracking
+    job_cmd = sub.add_parser(
+        "job", help="Manage job workspaces, checkpoints, and delivery receipts"
+    )
     job_sub = job_cmd.add_subparsers(dest="job_action", required=True)
 
     j_init = job_sub.add_parser("init", help="Initialize a job workspace folder")
@@ -423,7 +593,9 @@ def register_cli(subparser: argparse.ArgumentParser) -> None:
     j_cp.add_argument("job_id", help="Unique job ID")
     j_cp.add_argument("--stage", required=True, help="Stage identifier")
     j_cp.add_argument("--file", required=True, help="Checkpoint file path")
-    j_cp.add_argument("--not-verified", action="store_true", default=False, help="Mark checkpoint unverified")
+    j_cp.add_argument(
+        "--not-verified", action="store_true", default=False, help="Mark checkpoint unverified"
+    )
     j_cp.add_argument("--workspace", default=None, help="Base workspace directory")
     j_cp.add_argument("--meta", default=None, help="JSON-encoded metadata")
     j_cp.set_defaults(func=_cmd_job)
@@ -437,7 +609,9 @@ def register_cli(subparser: argparse.ArgumentParser) -> None:
     j_export.add_argument("job_id", help="Unique job ID")
     j_export.add_argument("--artifact-id", required=True, help="Unique artifact ID")
     j_export.add_argument("--file", required=True, help="Export artifact file path")
-    j_export.add_argument("--not-verified", action="store_true", default=False, help="Mark artifact unverified")
+    j_export.add_argument(
+        "--not-verified", action="store_true", default=False, help="Mark artifact unverified"
+    )
     j_export.add_argument("--workspace", default=None, help="Base workspace directory")
     j_export.add_argument("--meta", default=None, help="JSON-encoded metadata")
     j_export.set_defaults(func=_cmd_job)
@@ -446,7 +620,12 @@ def register_cli(subparser: argparse.ArgumentParser) -> None:
     j_deliver.add_argument("job_id", help="Unique job ID")
     j_deliver.add_argument("--artifact-id", required=True, help="Export artifact ID to deliver")
     j_deliver.add_argument("--destination", required=True, help="Destination path or URI")
-    j_deliver.add_argument("--status", choices=["pending", "delivered", "uncertain"], default="pending", help="Delivery status")
+    j_deliver.add_argument(
+        "--status",
+        choices=["pending", "delivered", "uncertain"],
+        default="pending",
+        help="Delivery status",
+    )
     j_deliver.add_argument("--receipt-id", default=None, help="Optional receipt ID")
     j_deliver.add_argument("--workspace", default=None, help="Base workspace directory")
     j_deliver.add_argument("--notes", default=None, help="Notes or delivery reason")
@@ -456,7 +635,12 @@ def register_cli(subparser: argparse.ArgumentParser) -> None:
     j_recon.add_argument("job_id", help="Unique job ID")
     j_recon.add_argument("--destination", required=True, help="Destination path or URI")
     j_recon.add_argument("--receipt-id", default=None, help="Receipt ID to reconcile")
-    j_recon.add_argument("--status", choices=["delivered", "failed"], default=None, help="Explicit confirmation status")
+    j_recon.add_argument(
+        "--status",
+        choices=["delivered", "failed"],
+        default=None,
+        help="Explicit confirmation status",
+    )
     j_recon.add_argument("--workspace", default=None, help="Base workspace directory")
     j_recon.add_argument("--notes", default=None, help="Reconciliation notes")
     j_recon.set_defaults(func=_cmd_job)
@@ -469,43 +653,102 @@ def register_cli(subparser: argparse.ArgumentParser) -> None:
     dev_cmd = sub.add_parser("develop", help="Develop and export an image via LightCraft")
     dev_cmd.add_argument("input_path", help="Source image or raw path")
     dev_cmd.add_argument("output_path", help="Developed output path")
-    dev_cmd.add_argument("--set", dest="sliders", action="append", default=[], metavar="KEY=VALUE", help="Set develop slider (repeatable)")
+    dev_cmd.add_argument(
+        "--set",
+        dest="sliders",
+        action="append",
+        default=[],
+        metavar="KEY=VALUE",
+        help="Set develop slider (repeatable)",
+    )
     dev_cmd.add_argument("--preset", default=None, help="Apply preset ID")
     dev_cmd.add_argument("--size", type=int, default=None, help="Output long edge in pixels")
-    dev_cmd.add_argument("--quality", type=int, default=92, help="Output quality 1..100 (default 92)")
-    dev_cmd.add_argument("--opt", dest="opts", action="append", default=[], metavar="KEY=VALUE", help="Export option (repeatable)")
-    dev_cmd.add_argument("--allow-overwrite", action="store_true", default=False, help="Allow overwriting existing output")
+    dev_cmd.add_argument(
+        "--quality", type=int, default=92, help="Output quality 1..100 (default 92)"
+    )
+    dev_cmd.add_argument(
+        "--opt",
+        dest="opts",
+        action="append",
+        default=[],
+        metavar="KEY=VALUE",
+        help="Export option (repeatable)",
+    )
+    dev_cmd.add_argument(
+        "--allow-overwrite",
+        action="store_true",
+        default=False,
+        help="Allow overwriting existing output",
+    )
     dev_cmd.set_defaults(func=_cmd_develop)
 
     aud_cmd = sub.add_parser("audio", help="Probe or convert/normalize audio via SoundCraft")
     aud_cmd.add_argument("action", choices=["info", "convert"], help="Audio action")
     aud_cmd.add_argument("input_path", help="Source audio file path")
-    aud_cmd.add_argument("output_path", nargs="?", default=None, help="Destination audio file path (required for convert)")
+    aud_cmd.add_argument(
+        "output_path",
+        nargs="?",
+        default=None,
+        help="Destination audio file path (required for convert)",
+    )
     aud_cmd.add_argument("--rate", type=int, default=None, help="Target sample rate in Hz")
-    aud_cmd.add_argument("--bit-depth", choices=["16", "24", "32f"], default=None, help="Target bit depth")
-    aud_cmd.add_argument("--normalize", action="store_true", default=False, help="Peak-normalize to -0.1 dBFS")
+    aud_cmd.add_argument(
+        "--bit-depth", choices=["16", "24", "32f"], default=None, help="Target bit depth"
+    )
+    aud_cmd.add_argument(
+        "--normalize", action="store_true", default=False, help="Peak-normalize to -0.1 dBFS"
+    )
     aud_cmd.add_argument("--dither", action="store_true", default=False, help="Always dither")
     aud_cmd.add_argument("--no-dither", action="store_true", default=False, help="Never dither")
-    aud_cmd.add_argument("--allow-overwrite", action="store_true", default=False, help="Allow overwriting existing output")
+    aud_cmd.add_argument(
+        "--allow-overwrite",
+        action="store_true",
+        default=False,
+        help="Allow overwriting existing output",
+    )
     aud_cmd.set_defaults(func=_cmd_audio)
 
-    vid_cmd = sub.add_parser("video", help="Probe media, render frames, or export video via FilmCraft")
-    vid_cmd.add_argument("action", choices=["probe", "render_frame", "export"], help="Video action")
-    vid_cmd.add_argument("--input", dest="input_path", default=None, help="Standalone media clip path")
-    vid_cmd.add_argument("--project", dest="project_path", default=None, help="FilmCraft project (.fcproj) path")
-    vid_cmd.add_argument("--demo", action="store_true", default=False, help="Use built-in demo project")
-    vid_cmd.add_argument("-o", "--output", dest="output_path", default=None, help="Output file path")
-    vid_cmd.add_argument("--seconds", type=float, default=0.0, help="Timestamp in seconds for render_frame")
-    vid_cmd.add_argument("--start", dest="start_seconds", type=float, default=None, help="Custom range start in seconds")
-    vid_cmd.add_argument("--end", dest="end_seconds", type=float, default=None, help="Custom range end in seconds")
+    vid_cmd = sub.add_parser(
+        "video", help="Probe media, render frames, or export video via FilmCraft"
+    )
+    vid_cmd.add_argument(
+        "action", choices=["probe", "render_frame", "export"], help="Video action"
+    )
+    vid_cmd.add_argument(
+        "--input", dest="input_path", default=None, help="Standalone media clip path"
+    )
+    vid_cmd.add_argument(
+        "--project", dest="project_path", default=None, help="FilmCraft project (.fcproj) path"
+    )
+    vid_cmd.add_argument(
+        "--demo", action="store_true", default=False, help="Use built-in demo project"
+    )
+    vid_cmd.add_argument(
+        "-o", "--output", dest="output_path", default=None, help="Output file path"
+    )
+    vid_cmd.add_argument(
+        "--seconds", type=float, default=0.0, help="Timestamp in seconds for render_frame"
+    )
+    vid_cmd.add_argument(
+        "--start", dest="start_seconds", type=float, default=None, help="Custom range start (s)"
+    )
+    vid_cmd.add_argument(
+        "--end", dest="end_seconds", type=float, default=None, help="Custom range end (s)"
+    )
     vid_cmd.add_argument("--format", default=None, help="Export format override")
     vid_cmd.add_argument("--preset", default=None, help="Export preset name")
     vid_cmd.add_argument("--scale", type=float, default=None, help="Frame scale factor (e.g. 0.5)")
     vid_cmd.add_argument("--quality", type=int, default=None, help="Export quality 0..100")
-    vid_cmd.add_argument("--no-audio", action="store_true", default=False, help="Omit audio streams")
-    vid_cmd.add_argument("--allow-overwrite", action="store_true", default=False, help="Allow overwriting existing output")
+    vid_cmd.add_argument(
+        "--no-audio", action="store_true", default=False, help="Omit audio streams"
+    )
+    vid_cmd.add_argument(
+        "--allow-overwrite",
+        action="store_true",
+        default=False,
+        help="Allow overwriting existing output",
+    )
     vid_cmd.set_defaults(func=_cmd_video)
-
 
 
 def main(argv: Any = None) -> int:

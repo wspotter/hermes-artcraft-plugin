@@ -12,15 +12,15 @@ metadata:
     related_skills: [artcraft-router, photo-inspection]
 ---
 
-# FilmCraft Basics Skill
+# FilmCraft Basics
 
-Probe video and audio containers, render still PNG frames, and trim or transcode standalone video clips and `.fcproj` projects non-destructively using `artcraft_video_basic` (`filmcraft-cli`). Every operation preserves the original input file and verifies the exported artifact.
+Probe video and audio containers, extract still PNG frames, and trim or transcode standalone video clips and `.fcproj` projects without modifying source files using `artcraft_video_basic` (`filmcraft-cli`).
 
 ## When to Use
 
 - Inspecting video container streams, codecs, frame rate, resolution, and duration (`action="probe"`).
-- Extracting a lossless PNG still frame at an exact timestamp (`action="render_frame"`) from a video clip or `.fcproj` timeline.
-- Trimming (`start_seconds`, `end_seconds`), scaling (`scale`), or transcoding (`format`, `preset`, `quality`, `no_audio`) a standalone video clip or `.fcproj` project (`action="export"`).
+- Extracting a still PNG frame at a timestamp (`action="render_frame"`) from a video clip or `.fcproj` timeline.
+- Trimming (`start_seconds`, `end_seconds`), scaling (`scale`), or transcoding (`format`, `preset`, `quality`, `no_audio`) a video clip or `.fcproj` project (`action="export"`).
 
 ## Prerequisites
 
@@ -39,7 +39,7 @@ Probe video and audio containers, render still PNG frames, and trim or transcode
 
 CLI equivalent:
 ```bash
-hermes artcraft video probe <work_dir>/source/clip.mp4
+hermes artcraft video probe --input <work_dir>/source/clip.mp4
 ```
 
 ### 2. Render a Still PNG Frame (`action="render_frame"`)
@@ -48,7 +48,7 @@ hermes artcraft video probe <work_dir>/source/clip.mp4
 {
   "action": "render_frame",
   "input_path": "<work_dir>/source/clip.mp4",
-  "output_path": "<work_dir>/previews/frame_02s.png",
+  "output_path": "<work_dir>/previews/frame_2_5s.png",
   "seconds": 2.5,
   "scale": 1.0
 }
@@ -56,7 +56,8 @@ hermes artcraft video probe <work_dir>/source/clip.mp4
 
 CLI equivalent:
 ```bash
-hermes artcraft video render-frame <work_dir>/source/clip.mp4 <work_dir>/previews/frame_02s.png \
+hermes artcraft video render_frame --input <work_dir>/source/clip.mp4 \
+  -o <work_dir>/previews/frame_2_5s.png \
   --seconds 2.5 \
   --scale 1.0
 ```
@@ -78,7 +79,8 @@ hermes artcraft video render-frame <work_dir>/source/clip.mp4 <work_dir>/preview
 
 CLI equivalent:
 ```bash
-hermes artcraft video export <work_dir>/source/clip.mp4 <work_dir>/exports/clip_trimmed.mp4 \
+hermes artcraft video export --input <work_dir>/source/clip.mp4 \
+  -o <work_dir>/exports/clip_trimmed.mp4 \
   --start 1.0 \
   --end 6.0 \
   --format mp4 \
@@ -89,16 +91,16 @@ hermes artcraft video export <work_dir>/source/clip.mp4 <work_dir>/exports/clip_
 ## Procedure
 
 1. Call `artcraft_video_basic` with `action="probe"` to inspect duration, resolution, frame rate, and `source_sha256`.
-2. To inspect visual quality at a timestamp, call `artcraft_video_basic` with `action="render_frame"` and a `.png` `output_path`, then inspect the frame with `artcraft_inspect`.
-3. To export or trim a clip or `.fcproj` project, call `artcraft_video_basic` with `action="export"`, providing `start_seconds`, `end_seconds`, `format`, `preset`, and `scale`.
+2. To review visual quality at a timestamp, call `artcraft_video_basic` with `action="render_frame"` and a `.png` `output_path`, then check the image with `artcraft_inspect`.
+3. To export or trim a clip or `.fcproj` project, call `artcraft_video_basic` with `action="export"` and the desired `start_seconds`, `end_seconds`, `format`, `preset`, and `scale`.
 
 ## Pitfalls
 
-- `render_frame` requires an output path ending in `.png` and decodes the resulting PNG to verify dimensions.
-- When trimming with `start_seconds` and `end_seconds`, confirm both timestamps lie within the probed clip duration (`end_seconds > start_seconds >= 0`).
-- Never overwrite `input_path`; always write to a new path under `<work_dir>/previews/` or `<work_dir>/exports/`.
+- `render_frame` writes PNG image bytes, so keep the `output_path` extension `.png` to match the file format.
+- When trimming with `start_seconds` and `end_seconds`, confirm both timestamps fit inside the probed clip duration (`end_seconds > start_seconds >= 0`).
+- Never overwrite `input_path`; write outputs to a fresh path under `<work_dir>/previews/` or `<work_dir>/exports/`.
 
 ## Verification
 
 - `render_frame` verifies that `source_sha256` is unchanged and decodes the output PNG to confirm non-zero `width` and `height`.
-- `export` verifies that `source_sha256` is unchanged, `output_path` exists with non-zero `size_bytes`, and records `output_sha256`.
+- `export` verifies that `source_sha256` is unchanged, confirms `output_path` is non-empty, and reports `size_bytes` and `output_sha256`.

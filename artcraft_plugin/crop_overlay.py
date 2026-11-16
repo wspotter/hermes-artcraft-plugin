@@ -35,7 +35,7 @@ def validate_crop(geometry, width, height):
             if ppi <= 0:
                 raise ValueError("pixels_per_inch must be positive")
             if min(right, ar) <= max(left, al) or min(bottom, ab) <= max(top, at):
-                raise ValueError("Crop must overlap the calibrated artwork rectangle")
+                raise ValueError("Crop must overlap the reference rectangle")
             trim = {
                 edge: max(0, distance) / ppi
                 for edge, distance in zip(
@@ -79,7 +79,11 @@ def render_crop_overlay(source_preview, output_preview, dimensions, points, path
     shaded.paste(source, mask=mask)
     ImageDraw.Draw(shaded).line(polygon + polygon[:1], fill="#ffdf42", width=3)
     gap, header = 16, 32
-    sheet = Image.new("RGB", (source.width + output.width + gap * 3, max(source.height, output.height) + header + gap), "#20262d")
+    sheet_size = (
+        source.width + output.width + gap * 3,
+        max(source.height, output.height) + header + gap,
+    )
+    sheet = Image.new("RGB", sheet_size, "#20262d")
     sheet.paste(shaded, (gap, header))
     sheet.paste(output, (source.width + 2 * gap, header))
     draw = ImageDraw.Draw(sheet)

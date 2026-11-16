@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
 import sys
@@ -12,16 +13,15 @@ from unittest.mock import patch
 
 from PIL import Image
 
-import importlib.util
-
 spec = importlib.util.spec_from_file_location(
-    "test_artcraft_plugin", Path(__file__).resolve().parents[1] / "__init__.py",
+    "test_artcraft_plugin",
+    Path(__file__).resolve().parents[1] / "__init__.py",
     submodule_search_locations=[str(Path(__file__).resolve().parents[1])],
 )
 plugin_root = importlib.util.module_from_spec(spec)
 sys.modules[spec.name] = plugin_root
 spec.loader.exec_module(plugin_root)
-from artcraft_plugin import tools
+from artcraft_plugin import schemas, tools  # noqa: E402
 
 
 class _FakeCtx:
@@ -153,7 +153,10 @@ class TestToolsAndPluginRegistration(unittest.TestCase):
                 ("points_empty", {**base_args, "points": []}),
                 ("points_outside_region", {**base_args, "points": [[10, 10]]}),
                 ("output_not_png", {**base_args, "output_path": str(root / "out.jpg")}),
-                ("output_parent_nonexistent", {**base_args, "output_path": str(root / "no_dir" / "out.png")}),
+                (
+                    "output_parent_nonexistent",
+                    {**base_args, "output_path": str(root / "no_dir" / "out.png")},
+                ),
             ]
 
             for label, args in invalid_cases:
@@ -212,6 +215,7 @@ class TestToolsAndPluginRegistration(unittest.TestCase):
                 self.assertFalse(res["ok"])
                 self.assertIn("timeout", res["error"])
                 self.assertFalse(out.exists())
+                self.assertEqual(src.read_bytes(), src_bytes)
 
     def test_prepare_inspection_tool(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -282,7 +286,7 @@ class TestToolsAndPluginRegistration(unittest.TestCase):
             missing_res = json.loads(tools.artcraft_restore_step({}))
             self.assertFalse(missing_res["ok"])
 
-            # Test stop/ask gate via tool
+            # Confirmation gate should stop without writing output
             gate_res = json.loads(
                 tools.artcraft_restore_step(
                     {
@@ -306,5 +310,101 @@ class TestToolsAndPluginRegistration(unittest.TestCase):
             self.assertTrue(list_res["ok"])
             self.assertEqual(list_res["checkpoints"], [])
 
+    def test_artcraft_status_reports_standalone_and_cli_capabilities(self) -> None:
+        with tempfile.TemporaryDirectory() as empty_dir, patch(
+            "artcraft_plugin.discovery._candidate_dirs", return_value=[Path(empty_dir)]
+        ), patch("artcraft_plugin.discovery.shutil.which", return_value=None):
+            res = json.loads(tools.artcraft_status({}))
+            self.assertTrue(res["ok"])
+            self.assertIn("apps", res)
+            caps = res["capabilities"]
+            self.assertTrue(caps["pillow_available"])
+            self.assertIn("artcraft_prepare_print", caps["available_tools"])
+            self.assertIn("artcraft_build_review", caps["available_tools"])
+            self.assertNotIn("photocraft_spot_heal", caps["available_tools"])
+            self.assertNotIn("artcraft_restore_step", caps["available_tools"])
+            self.assertIn("photocraft_spot_heal", caps["unavailable_tools"])
+            self.assertIn("artcraft_restore_step", caps["unavailable_tools"])
+            self.assertIn("artcraft_develop", caps["unavailable_tools"])
+            restore_caps = caps["partial_tools"]["artcraft_restore_step"]
+            self.assertFalse(restore_caps["available"])
+            self.assertEqual(restore_caps["standalone_recipes"], [])
+            self.assertIn("noise_and_grain", restore_caps["cli_recipes"])
+            self.assertFalse(restore_caps["cli_recipes"]["dust_and_scratches"]["available"])
 
+    def test_tool_schema_and_validation_guards(self) -> None:
+        print_props = schemas.ARTCRAFT_PREPARE_PRINT["parameters"]["properties"]
+        self.assertIn("allow_overwrite", print_props)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            src = root / "in.png"
+            out = root / "out.png"
+            Image.new("RGB", (80, 100), color=(40, 80, 120)).save(src)
+            Image.new("RGB", (80, 100), color=(10, 10, 10)).save(out)
+
+            bad_ppi = json.loads(
+                tools.artcraft_prepare_print(
+                    {
+                        "input_path": str(src),
+                        "output_path": str(root / "fresh.png"),
+                        "width_in": 8.0,
+                        "height_in": 10.0,
+                        "ppi": 0,
+                    }
+                )
+            )
+            self.assertFalse(bad_ppi["ok"])
+
+            refused = json.loads(
+                tools.artcraft_prepare_print(
+                    {
+                        "input_path": str(src),
+                        "output_path": str(out),
+                        "width_in": 8.0,
+                        "height_in": 10.0,
+                        "ppi": 10,
+                    }
+                )
+            )
+            self.assertFalse(refused["ok"])
+
+            allowed = json.loads(
+                tools.artcraft_prepare_print(
+                    {
+                        "input_path": str(src),
+                        "output_path": str(out),
+                        "width_in": 8.0,
+                        "height_in": 10.0,
+                        "ppi": 10,
+                        "allow_overwrite": True,
+                    }
+                )
+            )
+            self.assertTrue(allowed["ok"], allowed)
+
+            blank_recipe = json.loads(
+                tools.artcraft_restore_step(
+                    {
+                        "input_path": str(src),
+                        "output_path": str(root / "r.png"),
+                        "recipe": "   ",
+                    }
+                )
+            )
+            self.assertFalse(blank_recipe["ok"])
+
+            bad_timeout = json.loads(
+                tools.photocraft_spot_heal(
+                    {
+                        "input_path": str(src),
+                        "output_path": str(root / "h.png"),
+                        "points": [[10, 10]],
+                        "size": 4,
+                        "region": [5, 5, 20, 20],
+                        "timeout_s": -5,
+                    }
+                )
+            )
+            self.assertFalse(bad_timeout["ok"])
 

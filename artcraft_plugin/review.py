@@ -1,34 +1,37 @@
-"""Review package builder and quality-trap detection for ArtCraft plugin.
+"""Review package builder and automated defect checks for the ArtCraft plugin.
 
-Builds structured review packages: whole-photo before/after previews,
-native-resolution repaired-area crops, source/output SHA-256 hashes,
-mechanical checks (dimensions, aspect ratio, format, ICC profile), and
-automated mechanical/heuristic flags to catch intentionally poor results:
-  - Untouched scratch / no-op: 0 changed pixels in target region or globally.
-  - Unwanted crop: aspect ratio or framing changed unexpectedly without authorization.
-  - Smeared repair: excessive local variance/detail collapse in the repaired region
-    compared to surrounding reference texture (>80-90% variance drop).
+Builds structured edit reviews with before/after previews, 1:1 repair crops,
+source/output SHA-256 hashes, metadata checks (dimensions, aspect ratio, format,
+ICC profile), and defect checks for:
+  - Untouched scratch / no-op: zero changed pixels in the target region or globally.
+  - Unwanted crop: aspect ratio or framing changed without authorization.
+  - Smeared repair: local texture variance collapse in the repaired region
+    compared to surrounding pixels.
 Supports bounded retry tracking (retry_count, max_retries, last_checkpoint_path).
 """
 
 from __future__ import annotations
 
-import math
-import os
 import tempfile
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 
 from PIL import Image, ImageChops, ImageStat
 
+from .crop_overlay import render_crop_overlay, validate_crop
+from .inspect import (
+    compute_laplacian,
+    determine_aspect_ratio,
+)
+from .inspect import (
+    generate_preview as _generate_preview,
+)
+from .verify import _count_changed_pixels, inspect_image
+
 try:
     import numpy as np
 except ImportError:
     np = None
-
-from .crop_overlay import render_crop_overlay, validate_crop
-from .inspect import determine_aspect_ratio, determine_orientation
-from .verify import _count_changed_pixels, _validate_region, inspect_image, sha256_file
 
 
 def parse_aspect_ratio(val: Union[float, int, str, None]) -> Optional[float]:
@@ -99,14 +102,8 @@ def calculate_texture_metrics(
         var_sur = float(np.var(sur_pixels)) if sur_pixels.size > 0 else 0.0
 
         # Laplacian edge variance
-        if arr.shape[0] >= 3 and arr.shape[1] >= 3:
-            lap = (
-                arr[2:, 1:-1]
-                + arr[:-2, 1:-1]
-                + arr[1:-1, 2:]
-                + arr[1:-1, :-2]
-                - 4.0 * arr[1:-1, 1:-1]
-            )
+        lap = compute_laplacian(arr)
+        if lap is not None:
             # Offset by 1 due to slice boundary
             l_ry0 = max(0, ry0 - 1)
             l_ry1 = max(0, min(lap.shape[0], ry1 - 1))
@@ -156,18 +153,8 @@ def calculate_texture_metrics(
 
 def generate_preview(img: Image.Image, out_path: Path, max_dim: int = 1024) -> Tuple[int, int]:
     """Save a downscaled preview of img into out_path, preserving aspect ratio."""
-    w, h = img.width, img.height
-    scale = min(1.0, max_dim / max(w, h))
-    preview_w = max(1, int(round(w * scale)))
-    preview_h = max(1, int(round(h * scale)))
-
-    if scale < 1.0:
-        preview_img = img.resize((preview_w, preview_h), resample=Image.Resampling.LANCZOS)
-    else:
-        preview_img = img.copy()
-
-    preview_img.save(out_path, format="PNG")
-    return (preview_w, preview_h)
+    info = _generate_preview(img, out_path, max_dimension=max_dim)
+    return (info["width"], info["height"])
 
 
 def build_review_package(
@@ -186,18 +173,12 @@ def build_review_package(
     max_retries: int = 3,
     last_checkpoint_path: Optional[Union[str, Path]] = None,
 ) -> Dict[str, Any]:
-    """Build a structured review package for an image edit and test for defect traps.
+    """Build a structured review package for an image edit and run defect checks.
 
-    Checks:
-      1. Whole-photo before/after previews
-      2. Native-resolution repaired-area crops (with surrounding context)
-      3. Source and output SHA-256 hashes
-      4. Mechanical checks (dimensions, aspect ratio, format, ICC)
-      5. Automated defect detection:
-         - Untouched scratch / no-op: 0 changed pixels in repair region or globally
-         - Unwanted crop: aspect ratio or framing changed unexpectedly
-         - Smeared repair: >80-90% variance collapse compared to surrounding texture
-      6. Bounded retry tracking: retry_count, max_retries, last_checkpoint_path
+    Includes before/after previews, 1:1 repair crops, source/output SHA-256
+    hashes, metadata checks (dimensions, aspect ratio, format, ICC), defect
+    checks (no-op edits, unexpected framing shifts, smeared/blurred repairs),
+    and bounded retry tracking.
     """
     src_p = Path(source_path).expanduser().resolve()
     out_p = Path(output_path).expanduser().resolve()
@@ -238,9 +219,17 @@ def build_review_package(
     out_info = inspect_image(str(out_p))
 
     if not src_info.get("valid"):
-        return {"ok": False, "passed": False, "error": f"Invalid source image: {src_info.get('error')}"}
+        return {
+            "ok": False,
+            "passed": False,
+            "error": f"Invalid source image: {src_info.get('error')}",
+        }
     if not out_info.get("valid"):
-        return {"ok": False, "passed": False, "error": f"Invalid output image: {out_info.get('error')}"}
+        return {
+            "ok": False,
+            "passed": False,
+            "error": f"Invalid output image: {out_info.get('error')}",
+        }
 
     src_w, src_h = src_info["width"], src_info["height"]
     out_w, out_h = out_info["width"], out_info["height"]
@@ -269,7 +258,13 @@ def build_review_package(
         if crop_geometry is not None:
             overlay_dir = Path(tempfile.mkdtemp(prefix="crop-overlay-", dir=work_dir))
             overlay_path = overlay_dir / "comparison.png"
-            render_crop_overlay(src_preview_file, out_preview_file, (src_w, src_h), crop_review["retained_source_pixels"], overlay_path)
+            render_crop_overlay(
+                src_preview_file,
+                out_preview_file,
+                (src_w, src_h),
+                crop_review["retained_source_pixels"],
+                overlay_path,
+            )
             crop_review["comparison_path"] = str(overlay_path)
 
         # Total changed pixels calculation
@@ -283,26 +278,30 @@ def build_review_package(
             total_pixels = src_w * src_h
             changed_pixel_pct = 0.0
 
-        # Quality Trap 1: Untouched scratch / no-op globally
+        # Global no-op check
         if same_dims and total_changed_pixels == 0:
             flag = {
                 "id": "untouched_scratch",
                 "severity": "error",
-                "message": "Untouched scratch / no-op: Zero changed pixels detected between source and output.",
+                "message": (
+                    "Untouched scratch / no-op: Zero changed pixels detected "
+                    "between source and output."
+                ),
                 "details": {"total_changed_pixels": 0},
             }
             flags.append(flag)
             concerns.append(flag["message"])
 
-        # Quality Trap 2: Unwanted crop / framing change
+        # Aspect/framing check
         parsed_expected_aspect = parse_aspect_ratio(expected_aspect)
         if parsed_expected_aspect is not None:
             if abs(out_ratio - parsed_expected_aspect) > 0.005:
+                out_lbl = out_aspect_info.get("standard_label")
                 flag = {
                     "id": "unwanted_crop",
                     "severity": "error",
                     "message": (
-                        f"Unwanted crop: Output aspect ratio ({out_ratio:.4f}, {out_aspect_info.get('standard_label')}) "
+                        f"Unwanted crop: Output aspect ratio ({out_ratio:.4f}, {out_lbl}) "
                         f"does not match expected aspect ratio ({parsed_expected_aspect:.4f})."
                     ),
                     "details": {
@@ -315,12 +314,14 @@ def build_review_package(
                 concerns.append(flag["message"])
         elif preserve_framing:
             if abs(out_ratio - src_ratio) > 0.005:
+                src_lbl = src_aspect_info.get("standard_label")
+                out_lbl = out_aspect_info.get("standard_label")
                 flag = {
                     "id": "unwanted_crop",
                     "severity": "error",
                     "message": (
-                        f"Unwanted crop: Framing changed from {src_ratio:.4f} ({src_aspect_info.get('standard_label')}) "
-                        f"to {out_ratio:.4f} ({out_aspect_info.get('standard_label')}) when preserve_framing was requested."
+                        f"Unwanted crop: Framing changed from {src_ratio:.4f} ({src_lbl}) "
+                        f"to {out_ratio:.4f} ({out_lbl}) when preserve_framing was requested."
                     ),
                     "details": {
                         "source_aspect": src_ratio,
@@ -333,7 +334,11 @@ def build_review_package(
                 concerns.append(flag["message"])
 
         # Mechanical check for dimension mismatch if framing preserved
-        if preserve_framing and not same_dims and not any(f["id"] == "unwanted_crop" for f in flags):
+        if (
+            preserve_framing
+            and not same_dims
+            and not any(f["id"] == "unwanted_crop" for f in flags)
+        ):
             flag = {
                 "id": "dimension_mismatch",
                 "severity": "warning",
@@ -343,13 +348,15 @@ def build_review_package(
             flags.append(flag)
             concerns.append(flag["message"])
 
-        # Native-resolution repaired-area crops & quality trap 3 (smeared repair / untouched scratch per-region)
+        # Per-region 1:1 crops and smeared/blurred repair check
         crops_data: List[Dict[str, Any]] = []
 
         # If no regions specified but pixels changed on same-size image, auto-detect changed region
         effective_regions = list(norm_regions)
         if not effective_regions and same_dims and total_changed_pixels > 0:
-            diff_box = ImageChops.difference(s_img.convert("RGBA"), o_img.convert("RGBA")).getbbox()
+            diff_box = ImageChops.difference(
+                s_img.convert("RGBA"), o_img.convert("RGBA")
+            ).getbbox(alpha_only=False)
             if diff_box:
                 dx0, dy0, dx1, dy1 = diff_box
                 effective_regions.append((dx0, dy0, dx1 - dx0, dy1 - dy0))
@@ -364,7 +371,9 @@ def build_review_package(
                 flag = {
                     "id": "invalid_region",
                     "severity": "error",
-                    "message": f"Region {[rx, ry, rw, rh]} exceeds source image bounds ({src_w}x{src_h}).",
+                    "message": (
+                        f"Region {[rx, ry, rw, rh]} exceeds source image bounds ({src_w}x{src_h})."
+                    ),
                     "details": {"region": [rx, ry, rw, rh]},
                 }
                 flags.append(flag)
@@ -380,8 +389,16 @@ def build_review_package(
             half_w = target_crop_dim // 2
             half_h = target_crop_dim // 2
 
-            crop_x0 = max(0, min(src_w - target_crop_dim, cx - half_w)) if src_w >= target_crop_dim else 0
-            crop_y0 = max(0, min(src_h - target_crop_dim, cy - half_h)) if src_h >= target_crop_dim else 0
+            crop_x0 = (
+                max(0, min(src_w - target_crop_dim, cx - half_w))
+                if src_w >= target_crop_dim
+                else 0
+            )
+            crop_y0 = (
+                max(0, min(src_h - target_crop_dim, cy - half_h))
+                if src_h >= target_crop_dim
+                else 0
+            )
             crop_x1 = min(src_w, crop_x0 + target_crop_dim)
             crop_y1 = min(src_h, crop_y0 + target_crop_dim)
 
@@ -411,21 +428,27 @@ def build_review_package(
                 o_exact = o_img.crop((rx, ry, rx + rw, ry + rh))
                 changed_in_region = _count_changed_pixels(s_exact, o_exact)
 
-                # Quality Trap 1 (Per-region untouched scratch)
+                # Per-region no-op check
                 if changed_in_region == 0:
                     untouched_flag = {
                         "id": "untouched_scratch",
                         "severity": "error",
                         "message": (
-                            f"Untouched scratch / no-op: Zero changed pixels in target repair region {[rx, ry, rw, rh]}."
+                            "Untouched scratch / no-op: Zero changed pixels in "
+                            f"target repair region {[rx, ry, rw, rh]}."
                         ),
                         "details": {"region": [rx, ry, rw, rh], "changed_pixels": 0},
                     }
-                    if not any(f["id"] == "untouched_scratch" and f.get("details", {}).get("region") == [rx, ry, rw, rh] for f in flags):
+                    already_flagged = any(
+                        f["id"] == "untouched_scratch"
+                        and f.get("details", {}).get("region") == [rx, ry, rw, rh]
+                        for f in flags
+                    )
+                    if not already_flagged:
                         flags.append(untouched_flag)
                         concerns.append(untouched_flag["message"])
 
-                # Quality Trap 3: Smeared repair (variance / detail collapse)
+                # Smeared/blurred repair check (local variance collapse)
                 texture_metrics = calculate_texture_metrics(
                     out_crop,
                     (rel_rx0, rel_ry0, rel_rx1, rel_ry1),
@@ -436,7 +459,7 @@ def build_review_package(
                 var_drop = texture_metrics["variance_drop_pct"]
                 lap_drop = texture_metrics["laplacian_drop_pct"]
 
-                # If surrounding texture has authentic grain/detail and repair region collapsed >80%
+                # Flag severe variance collapse when surrounding texture has visible detail
                 is_textured_surround = (sur_lap >= 10.0 or sur_var >= 12.0)
                 is_severe_collapse = (lap_drop >= 80.0 or var_drop >= 85.0)
 
@@ -445,9 +468,10 @@ def build_review_package(
                         "id": "smeared_repair",
                         "severity": "error",
                         "message": (
-                            f"Smeared repair: Excessive texture variance collapse in region {[rx, ry, rw, rh]} "
-                            f"({max(var_drop, lap_drop):.1f}% drop). Repair appears blurred or smeared "
-                            "relative to surrounding reference texture."
+                            "Smeared repair: Excessive texture variance collapse in region "
+                            f"{[rx, ry, rw, rh]} ({max(var_drop, lap_drop):.1f}% drop). "
+                            "Repair appears blurred or smeared relative to surrounding "
+                            "reference texture."
                         ),
                         "details": {
                             "region": [rx, ry, rw, rh],
@@ -457,13 +481,14 @@ def build_review_package(
                     flags.append(smear_flag)
                     concerns.append(smear_flag["message"])
 
+            changed_pct = round((changed_in_region / (rw * rh)) * 100.0, 2) if rw * rh else 0.0
             crops_data.append({
                 "region": [rx, ry, rw, rh],
                 "crop_box": [crop_x0, crop_y0, crop_x1, crop_y1],
                 "source_crop_path": str(src_crop_path),
                 "output_crop_path": str(out_crop_path) if out_crop_path else None,
                 "changed_pixels": changed_in_region,
-                "changed_pct": round((changed_in_region / (rw * rh)) * 100.0, 2) if rw * rh else 0.0,
+                "changed_pct": changed_pct,
                 "texture_metrics": texture_metrics,
             })
 
@@ -482,9 +507,13 @@ def build_review_package(
 
     # Format / Mode / ICC concerns
     if not mechanical_checks["format_match"]:
-        concerns.append(f"Format changed from {src_info.get('format')} to {out_info.get('format')}.")
+        concerns.append(
+            f"Format changed from {src_info.get('format')} to {out_info.get('format')}."
+        )
     if not mechanical_checks["color_mode_match"]:
-        concerns.append(f"Color mode changed from {src_info.get('mode')} to {out_info.get('mode')}.")
+        concerns.append(
+            f"Color mode changed from {src_info.get('mode')} to {out_info.get('mode')}."
+        )
     if src_info.get("has_icc_profile") and not out_info.get("has_icc_profile"):
         flag = {
             "id": "icc_dropped",
@@ -520,12 +549,13 @@ def build_review_package(
 
     if passed:
         summary = (
-            f"Review passed: All mechanical checks passed ({out_w}x{out_h}, {out_info.get('format')}). "
-            f"Repaired regions verified with authentic texture and no unwanted cropping."
+            f"Review passed: All mechanical checks passed ({out_w}x{out_h}, "
+            f"{out_info.get('format')}). Repaired regions verified with consistent "
+            "texture and framing."
         )
     else:
         error_names = ", ".join(sorted(list({f["id"] for f in flags}))) or "Unverified edit"
-        summary = f"Review rejected: Quality traps or defects detected ({error_names})."
+        summary = f"Review rejected: defects detected ({error_names})."
 
     return {
         "ok": True,

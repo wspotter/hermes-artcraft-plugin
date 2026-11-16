@@ -21,8 +21,12 @@ class CropOverlayTests(unittest.TestCase):
             def review(**geometry):
                 return json.loads(artcraft_build_review(dict(args, crop_geometry=geometry)))
 
-            retained = review(rect=[10, 10, 90, 90], artwork_rect=[10, 10, 90, 90], pixels_per_inch=40)
-            trimmed = review(rect=[10, 10, 90, 70], artwork_rect=[10, 10, 90, 90], pixels_per_inch=40)
+            retained = review(
+                rect=[10, 10, 90, 90], artwork_rect=[10, 10, 90, 90], pixels_per_inch=40
+            )
+            trimmed = review(
+                rect=[10, 10, 90, 70], artwork_rect=[10, 10, 90, 90], pixels_per_inch=40
+            )
             self.assertEqual(retained["crop_review"]["paint_trim_inches"]["bottom"], 0)
             self.assertEqual(trimmed["crop_review"]["paint_trim_inches"]["bottom"], 0.5)
             with Image.open(retained["crop_review"]["comparison_path"]) as first:
@@ -33,4 +37,5 @@ class CropOverlayTests(unittest.TestCase):
             self.assertEqual(quad["crop_review"]["trim_status"], "unmeasured")
             self.assertFalse(review(quad=[[10, 10], [90, 90], [90, 10], [10, 90]])["ok"])
             self.assertFalse(review(rect=[0, 0, 101, 100])["ok"])
-            self.assertEqual(json.loads(artcraft_build_review(args))["crop_review"]["status"], "not_supplied")
+            no_crop = json.loads(artcraft_build_review(args))
+            self.assertEqual(no_crop["crop_review"]["status"], "not_supplied")

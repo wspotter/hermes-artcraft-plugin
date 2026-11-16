@@ -12,13 +12,13 @@ metadata:
     related_skills: [photo-restoration, photo-inspection, lightcraft-basics]
 ---
 
-# Recipe: Faded Tones Skill
+# Recipe: Faded Tones
 
-Restore washed-out blacks, milky shadows, and compressed midtone contrast using `artcraft_restore_step` (`recipe="faded_tones"`) or `artcraft_develop` without crushing shadows or blowing out highlights.
+Restore washed-out blacks, milky shadows, and flat midtone contrast using `artcraft_restore_step` (`recipe="faded_tones"`) or `artcraft_develop` without crushing shadows or blowing out highlights.
 
 ## When to Use
 
-- Inspection metrics from `artcraft_prepare_inspection` show elevated minimum luminance (`> 25`), lowered maximum luminance (`< 240`), and `0.0%` highlight/shadow clipping.
+- Metrics from `artcraft_prepare_inspection` show lifted minimum luminance (`> 25`), reduced maximum luminance (`< 240`), and `0.0%` highlight/shadow clipping.
 
 ## Prerequisites
 
@@ -38,8 +38,8 @@ Restore washed-out blacks, milky shadows, and compressed midtone contrast using 
     "in_black": 12,
     "in_white": 242,
     "gamma": 1.05,
-    "out_black": 0,
-    "out_white": 255
+    "outBlack": 0,
+    "outWhite": 255
   },
   "checkpoint_dir": "<work_dir>/checkpoints",
   "step_name": "01_faded_tones"
@@ -59,12 +59,12 @@ hermes artcraft develop <work_dir>/source/photo.png <work_dir>/work/step_faded_t
 
 1. Set `in_black` between `5` and `30` (default `12`, safe maximum `50`).
 2. Set `in_white` between `225` and `250` (default `242`, safe minimum `200`).
-3. Set `gamma` between `0.90` and `1.15` (default `1.05`, safe range `0.7..1.5`).
+3. Set `gamma` between `0.90` and `1.15` (default `1.05`, safe range `0.7..1.5`), and pass `outBlack` / `outWhite` in camelCase if overriding output endpoints.
 
 ## Pitfalls
 
-- Stop and return `status: "needs_decision"` if `in_black > 50`, `in_white < 200`, or if the source already exhibits shadow or highlight clipping that would be worsened.
+- `artcraft_restore_step` stops and returns `status: "needs_decision"` when `in_black > 50`, `in_white < 200`, or `gamma` is outside `0.7..1.5`. Pause as well if the source already shows clipped shadows or highlights that levels compression would worsen.
 
 ## Verification
 
-- Inspect 1:1 native crops of deep shadows and bright highlights in `checkpoint_dir` to confirm subtle gradations remain distinct.
+- Inspect 1:1 native crops of deep shadows and bright highlights in `checkpoint_dir` to confirm subtle detail remains visible.

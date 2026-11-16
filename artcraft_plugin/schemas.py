@@ -3,8 +3,8 @@
 ARTCRAFT_STATUS = {
     "name": "artcraft_status",
     "description": (
-        "Discover installed ArtCraft CLI binaries (photocraft-cli, lightcraft-cli, "
-        "filmcraft-cli, soundcraft-cli) and report their paths and versions."
+        "Report installed ArtCraft CLI binaries (photocraft-cli, lightcraft-cli, "
+        "filmcraft-cli, soundcraft-cli), Pillow availability, and which plugin tools are runnable."
     ),
     "parameters": {
         "type": "object",
@@ -34,10 +34,9 @@ ARTCRAFT_INSPECT = {
 ARTCRAFT_PREPARE_INSPECTION = {
     "name": "artcraft_prepare_inspection",
     "description": (
-        "Prepare an image for agent visual inspection: generates a whole-photo preview "
-        "and 1:1 native-resolution crops into a working directory without altering the "
-        "source file. Computes orientation, color profile, effective print resolution (PPI), "
-        "and measured clues (endpoint clipping, sharpness, noise) with explicit measurement limits."
+        "Generate a downscaled preview and 1:1 native crops in a working directory without "
+        "modifying the source file. Also reports orientation, color profile, effective print "
+        "PPI, and image metrics (clipping, sharpness, noise) with interpretation limits."
     ),
     "parameters": {
         "type": "object",
@@ -48,11 +47,16 @@ ARTCRAFT_PREPARE_INSPECTION = {
             },
             "working_dir": {
                 "type": "string",
-                "description": "Directory to write preview and crops into. Created if missing. Defaults to a temp directory.",
+                "description": (
+                    "Directory to write preview and crops into. Created if missing. "
+                    "Defaults to a temp directory."
+                ),
             },
             "max_preview_dimension": {
                 "type": "integer",
-                "description": "Maximum width/height of the generated preview image (default 1024).",
+                "description": (
+                    "Maximum width/height of the generated preview image (default 1024)."
+                ),
                 "minimum": 64,
                 "maximum": 4096,
             },
@@ -70,11 +74,16 @@ ARTCRAFT_PREPARE_INSPECTION = {
                     "minItems": 4,
                     "maxItems": 4,
                 },
-                "description": "Optional list of custom crop regions [x, y, width, height] in source pixels.",
+                "description": (
+                    "Optional list of custom crop regions [x, y, width, height] in source pixels."
+                ),
             },
             "target_print_sizes": {
                 "type": "array",
-                "description": "Optional custom target print sizes to compute effective PPI for (e.g. [[8, 10], [11, 14]]).",
+                "description": (
+                    "Optional custom target print sizes to compute effective PPI for "
+                    "(e.g. [[8, 10], [11, 14]])."
+                ),
             },
         },
         "required": ["path"],
@@ -84,9 +93,8 @@ ARTCRAFT_PREPARE_INSPECTION = {
 ARTCRAFT_VERIFY_EDIT = {
     "name": "artcraft_verify_edit",
     "description": (
-        "Verify an edited image against its source input. Checks that the output is a "
-        "valid image, optionally matches expected dimensions, and has non-zero pixel "
-        "changes (catching silent no-op edits)."
+        "Verify an edited image against its source input. Checks that the output decodes "
+        "cleanly, optionally matches expected dimensions, and contains pixel changes."
     ),
     "parameters": {
         "type": "object",
@@ -112,11 +120,15 @@ ARTCRAFT_VERIFY_EDIT = {
                 "items": {"type": "integer"},
                 "minItems": 4,
                 "maxItems": 4,
-                "description": "Optional [x, y, width, height] region that must show pixel changes.",
+                "description": (
+                    "Optional [x, y, width, height] region that must show pixel changes."
+                ),
             },
             "require_pixel_change": {
                 "type": "boolean",
-                "description": "Fail verification if output is pixel-identical to input (default true).",
+                "description": (
+                    "Fail verification if output is pixel-identical to input (default true)."
+                ),
             },
         },
         "required": ["input_path", "output_path"],
@@ -154,9 +166,15 @@ PHOTOCRAFT_SPOT_HEAL = {
                 "minItems": 2, "maxItems": 2,
             }, "description": "Stroke points in source pixel coordinates."},
             "size": {"type": "integer", "minimum": 1, "maximum": 256},
-            "region": {"type": "array", "items": {"type": "integer"},
-                       "minItems": 4, "maxItems": 4,
-                       "description": "[x, y, width, height] covering the allowed edit including brush edges."},
+            "region": {
+                "type": "array",
+                "items": {"type": "integer"},
+                "minItems": 4,
+                "maxItems": 4,
+                "description": (
+                    "[x, y, width, height] covering the allowed edit including brush edges."
+                ),
+            },
             "timeout_s": {
                 "type": "number",
                 "description": "Optional execution timeout in seconds (default 120.0).",
@@ -169,13 +187,10 @@ PHOTOCRAFT_SPOT_HEAL = {
 ARTCRAFT_PREPARE_PRINT = {
     "name": "artcraft_prepare_print",
     "description": (
-        "Prepare an agreed print request into a correctly sized, verified delivery file. "
-        "Calculates required pixels from physical dimensions (width_in, height_in) and PPI, "
-        "compares aspect ratios, enforces a clarification gate when instructions conflict "
-        "between borderless crop and margins, strictly preserves proportions, reports effective "
-        "source resolution separately from export resolution, preserves ICC color profiles, "
-        "reopens and decodes the delivery file to verify dimensions, PPI, format, and profile, "
-        "and produces a visual composition preview."
+        "Resize and lay out a source photo for print at target physical dimensions (width_in, "
+        "height_in) and PPI. Preserves aspect ratio, asks before cropping when borderless fit "
+        "conflicts with source proportions, reports effective source PPI separately from export "
+        "PPI, keeps embedded ICC profiles, verifies the written file, and saves a preview."
     ),
     "parameters": {
         "type": "object",
@@ -186,7 +201,7 @@ ARTCRAFT_PREPARE_PRINT = {
             },
             "output_path": {
                 "type": "string",
-                "description": "Path for the prepared print delivery file.",
+                "description": "Path for the prepared print file.",
             },
             "width_in": {
                 "type": "number",
@@ -206,12 +221,17 @@ ARTCRAFT_PREPARE_PRINT = {
                 "type": "string",
                 "enum": ["auto", "borderless", "crop", "margins", "fit"],
                 "default": "auto",
-                "description": "Fit mode: 'borderless'/'crop' to fill sheet; 'margins'/'fit' to preserve entire photo with margins.",
+                "description": (
+                    "Fit mode: 'borderless'/'crop' to fill sheet; "
+                    "'margins'/'fit' to preserve entire photo with margins."
+                ),
             },
             "confirm_crop": {
                 "type": "boolean",
                 "default": False,
-                "description": "Confirm cropping when aspect ratio conflicts with sheet in borderless mode.",
+                "description": (
+                    "Confirm cropping when aspect ratio conflicts with sheet in borderless mode."
+                ),
             },
             "ppi": {
                 "type": "integer",
@@ -236,7 +256,10 @@ ARTCRAFT_PREPARE_PRINT = {
             "allow_upscale": {
                 "type": "boolean",
                 "default": False,
-                "description": "Allow upscaling if source image resolution is smaller than target print pixels.",
+                "description": (
+                    "Allow upscaling if source image resolution is smaller "
+                    "than target print pixels."
+                ),
             },
             "target_icc": {
                 "type": "string",
@@ -246,6 +269,11 @@ ARTCRAFT_PREPARE_PRINT = {
                 "type": "string",
                 "description": "Optional explicit path to save the verification preview.",
             },
+            "allow_overwrite": {
+                "type": "boolean",
+                "default": False,
+                "description": "Allow overwriting output_path if it already exists.",
+            },
         },
         "required": ["input_path", "output_path", "width_in", "height_in"],
     },
@@ -254,11 +282,10 @@ ARTCRAFT_PREPARE_PRINT = {
 ARTCRAFT_RESTORE_STEP = {
     "name": "artcraft_restore_step",
     "description": (
-        "Apply a verified restoration recipe to an aged or damaged photograph: "
-        "faded_tones, color_cast, dust_and_scratches, noise_and_grain, sharpening, enlargement. "
-        "Stores a checkpoint and native-resolution comparison crops before and after the step. "
-        "Enforces the Stop/Ask Gate: refuses destructive operations and hallucinated reconstructions "
-        "without explicit approval."
+        "Apply a restoration recipe (faded_tones, color_cast, dust_and_scratches, "
+        "noise_and_grain, sharpening, or enlargement), recording a checkpoint and before/after "
+        "comparison crops. Requires operator confirmation before reconstructing missing content "
+        "or exceeding safe parameter bounds."
     ),
     "parameters": {
         "type": "object",
@@ -285,14 +312,19 @@ ARTCRAFT_RESTORE_STEP = {
             },
             "parameters": {
                 "type": "object",
-                "description": "Optional recipe parameters (e.g. contrast, shadow_lift, color_temp, noise_strength, radius).",
+                "description": (
+                    "Optional recipe parameters (e.g. contrast, shadow_lift, color_temp, "
+                    "noise_strength, radius)."
+                ),
             },
             "region": {
                 "type": "array",
                 "items": {"type": "integer"},
                 "minItems": 4,
                 "maxItems": 4,
-                "description": "Optional [x, y, width, height] region for localized healing or crop focus.",
+                "description": (
+                    "Optional [x, y, width, height] region for localized healing or crop focus."
+                ),
             },
             "checkpoint_dir": {
                 "type": "string",
@@ -300,7 +332,9 @@ ARTCRAFT_RESTORE_STEP = {
             },
             "step_name": {
                 "type": "string",
-                "description": "Optional custom name for this checkpoint step (e.g. '01_faded_tones').",
+                "description": (
+                    "Optional custom name for this checkpoint step (e.g. '01_faded_tones')."
+                ),
             },
             "crop_regions": {
                 "type": "array",
@@ -310,21 +344,31 @@ ARTCRAFT_RESTORE_STEP = {
                     "minItems": 4,
                     "maxItems": 4,
                 },
-                "description": "Optional list of [x, y, w, h] regions for before/after comparison crops.",
+                "description": (
+                    "Optional list of [x, y, w, h] regions for before/after comparison crops."
+                ),
             },
             "target_print_ppi": {
                 "type": "integer",
                 "default": 300,
-                "description": "Target print resolution in PPI for simulated print-scale crops (default 300).",
+                "description": (
+                    "Target print resolution in PPI for simulated print-scale crops (default 300)."
+                ),
             },
             "reconstruct_missing": {
                 "type": "boolean",
                 "default": False,
-                "description": "Set true if request requires reconstructing missing features (triggers Stop/Ask Gate).",
+                "description": (
+                    "Set true if the request requires reconstructing missing features "
+                    "(triggers confirmation gate)."
+                ),
             },
             "content_type": {
                 "type": "string",
-                "description": "Content type hint (e.g. 'missing_face', 'missing_lettering'). Triggers Stop/Ask Gate.",
+                "description": (
+                    "Content type hint (e.g. 'missing_face', 'missing_lettering'); "
+                    "triggers confirmation gate."
+                ),
             },
             "allow_overwrite": {
                 "type": "boolean",
@@ -343,14 +387,18 @@ ARTCRAFT_RESTORE_STEP = {
 
 ARTCRAFT_CHECKPOINT = {
     "name": "artcraft_checkpoint",
-    "description": "Inspect and list restoration checkpoints and comparison crops for a restoration session.",
+    "description": (
+        "Inspect and list restoration checkpoints and comparison crops for a restoration session."
+    ),
     "parameters": {
         "type": "object",
         "properties": {
             "action": {
                 "type": "string",
                 "enum": ["list", "get"],
-                "description": "Action to perform: 'list' all checkpoints or 'get' details for one step.",
+                "description": (
+                    "Action to perform: 'list' all checkpoints or 'get' details for one step."
+                ),
             },
             "checkpoint_dir": {
                 "type": "string",
@@ -367,12 +415,10 @@ ARTCRAFT_CHECKPOINT = {
 ARTCRAFT_BUILD_REVIEW = {
     "name": "artcraft_build_review",
     "description": (
-        "Build a structured review package for an image edit: whole-photo before/after previews, "
-        "native-resolution repaired-area crops with local texture variance metrics, source/output hashes, "
-        "mechanical checks (dimensions, aspect ratio, format, ICC), concise summary of changes & concerns, "
-        "and automated defect detection flags: untouched scratch / no-op (0 changed pixels), unwanted crop "
-        "(unexpected aspect or framing change), and smeared repair (>80% variance collapse). "
-        "Supports bounded retry tracking (retry_count, max_retries, last_checkpoint_path)."
+        "Build a structured edit review with before/after previews, 1:1 repair crops, "
+        "local texture metrics, file hashes, and automated checks for no-op edits, "
+        "unexpected framing shifts, and blurred or smeared repairs. Supports bounded "
+        "retry tracking (retry_count, max_retries, last_checkpoint_path)."
     ),
     "parameters": {
         "type": "object",
@@ -381,8 +427,15 @@ ARTCRAFT_BUILD_REVIEW = {
             "output_path": {"type": "string", "description": "Edited/repaired output image path."},
             "regions": {
                 "type": "array",
-                "items": {"type": "array", "items": {"type": "integer"}, "minItems": 4, "maxItems": 4},
-                "description": "Optional list of target repair regions [x, y, width, height] in source pixels.",
+                "items": {
+                    "type": "array",
+                    "items": {"type": "integer"},
+                    "minItems": 4,
+                    "maxItems": 4,
+                },
+                "description": (
+                    "Optional list of target repair regions [x, y, width, height] in source pixels."
+                ),
             },
             "region": {
                 "type": "array",
@@ -391,15 +444,51 @@ ARTCRAFT_BUILD_REVIEW = {
                 "maxItems": 4,
                 "description": "Optional single repair region [x, y, width, height].",
             },
-            "working_dir": {"type": "string", "description": "Optional directory to store previews and crops."},
-            "max_preview_dimension": {"type": "integer", "default": 1024, "description": "Max preview size in px."},
-            "crop_size": {"type": "integer", "default": 256, "description": "Native crop dimension in px."},
-            "expected_aspect": {"type": "string", "description": "Optional expected aspect ratio (e.g. '4:5' or 0.8)."},
-            "crop_geometry": {"type": "object", "description": "Editor-supplied source pixel geometry: rect [left,top,right,bottom] or quad of four ordered [x,y] points. For a rect on a straightened source, optional artwork_rect and pixels_per_inch measure paint trim."},
-            "preserve_framing": {"type": "boolean", "default": True, "description": "Whether framing/aspect must match source unless authorized."},
-            "retry_count": {"type": "integer", "default": 0, "description": "Current retry attempt index."},
-            "max_retries": {"type": "integer", "default": 3, "description": "Maximum allowed retry attempts."},
-            "last_checkpoint_path": {"type": "string", "description": "Path to last known good checkpoint to resume from on failure."},
+            "working_dir": {
+                "type": "string",
+                "description": "Optional directory to store previews and crops.",
+            },
+            "max_preview_dimension": {
+                "type": "integer",
+                "default": 1024,
+                "description": "Max preview size in px.",
+            },
+            "crop_size": {
+                "type": "integer",
+                "default": 256,
+                "description": "Native crop dimension in px.",
+            },
+            "expected_aspect": {
+                "type": "string",
+                "description": "Optional expected aspect ratio (e.g. '4:5' or 0.8).",
+            },
+            "crop_geometry": {
+                "type": "object",
+                "description": (
+                    "Editor-supplied source pixel geometry: rect [left,top,right,bottom] or quad "
+                    "of four ordered [x,y] points. For a rect on a straightened source, optional "
+                    "artwork_rect and pixels_per_inch report per-edge trim in inches."
+                ),
+            },
+            "preserve_framing": {
+                "type": "boolean",
+                "default": True,
+                "description": "Whether framing/aspect must match source unless authorized.",
+            },
+            "retry_count": {
+                "type": "integer",
+                "default": 0,
+                "description": "Current retry attempt index.",
+            },
+            "max_retries": {
+                "type": "integer",
+                "default": 3,
+                "description": "Maximum allowed retry attempts.",
+            },
+            "last_checkpoint_path": {
+                "type": "string",
+                "description": "Path to last known good checkpoint to resume from on failure.",
+            },
         },
         "required": ["source_path", "output_path"],
     },
@@ -408,34 +497,72 @@ ARTCRAFT_BUILD_REVIEW = {
 ARTCRAFT_JOB = {
     "name": "artcraft_job",
     "description": (
-        "Manage deterministic ArtCraft job workspaces (source/, work/, previews/, exports/, job.json). "
-        "Supports creating/initializing jobs, saving checkpoints, resuming from the last verified checkpoint, "
-        "recording verified export artifacts, recording delivery receipts, preventing duplicate deliveries of "
-        "the same hash to the same destination, and reconciling uncertain delivery receipts before retrying."
+        "Manage ArtCraft job workspaces (source/, work/, previews/, exports/, job.json), "
+        "including checkpoints, resume recovery, verified export artifacts, duplicate-safe "
+        "delivery receipts, and reconciliation of uncertain deliveries before retrying."
     ),
     "parameters": {
         "type": "object",
         "properties": {
             "action": {
                 "type": "string",
-                "enum": ["init", "checkpoint", "resume", "export", "deliver", "reconcile", "status"],
+                "enum": [
+                    "init",
+                    "checkpoint",
+                    "resume",
+                    "export",
+                    "deliver",
+                    "reconcile",
+                    "status",
+                ],
                 "description": "Job action to perform.",
             },
             "job_id": {"type": "string", "description": "Unique job identifier."},
-            "workspace_dir": {"type": "string", "description": "Optional base workspace directory."},
-            "source_path": {"type": "string", "description": "Source image path (used with 'init')."},
-            "stage": {"type": "string", "description": "Stage name for checkpoint (e.g. 'spot_heal', 'print_prep')."},
-            "file_path": {"type": "string", "description": "File path for checkpoint or export artifact."},
-            "verified": {"type": "boolean", "default": True, "description": "Whether checkpoint or artifact is verified (default true)."},
-            "artifact_id": {"type": "string", "description": "Artifact identifier for export or delivery."},
-            "destination": {"type": "string", "description": "Destination file path or URI for delivery or reconciliation."},
+            "workspace_dir": {
+                "type": "string",
+                "description": "Optional base workspace directory.",
+            },
+            "source_path": {
+                "type": "string",
+                "description": "Source image path (used with 'init').",
+            },
+            "stage": {
+                "type": "string",
+                "description": "Stage name for checkpoint (e.g. 'spot_heal', 'print_prep').",
+            },
+            "file_path": {
+                "type": "string",
+                "description": "File path for checkpoint or export artifact.",
+            },
+            "verified": {
+                "type": "boolean",
+                "default": True,
+                "description": "Whether checkpoint or artifact is verified (default true).",
+            },
+            "artifact_id": {
+                "type": "string",
+                "description": "Artifact identifier for export or delivery.",
+            },
+            "destination": {
+                "type": "string",
+                "description": "Destination file path or URI for delivery or reconciliation.",
+            },
             "status": {
                 "type": "string",
                 "enum": ["pending", "delivered", "uncertain", "failed"],
-                "description": "Delivery status (default 'pending' for deliver; or 'delivered'/'failed' for reconcile).",
+                "description": (
+                    "Delivery status (default 'pending' for deliver; "
+                    "or 'delivered'/'failed' for reconcile)."
+                ),
             },
-            "receipt_id": {"type": "string", "description": "Optional delivery receipt ID for reconcile."},
-            "notes": {"type": "string", "description": "Optional notes or reason for delivery/reconciliation."},
+            "receipt_id": {
+                "type": "string",
+                "description": "Optional delivery receipt ID for reconcile.",
+            },
+            "notes": {
+                "type": "string",
+                "description": "Optional notes or reason for delivery/reconciliation.",
+            },
             "metadata": {"type": "object", "description": "Optional arbitrary metadata dict."},
         },
         "required": ["action", "job_id"],
@@ -445,10 +572,10 @@ ARTCRAFT_JOB = {
 ARTCRAFT_DEVELOP = {
     "name": "artcraft_develop",
     "description": (
-        "Develop and export an image or raw file non-destructively via LightCraft (`lightcraft-cli render`). "
-        "Supports develop sliders (`light.exposure`, `light.contrast`, `color.temp`, `color.vibrance`, "
-        "`detail.sharpening`, etc.), presets, long-edge resize, quality, and export options while verifying "
-        "that source_sha256 is unchanged and the output image decodes cleanly."
+        "Develop and export an image or raw file via LightCraft (`lightcraft-cli render`) "
+        "without altering the source. Supports develop sliders (`light.exposure`, "
+        "`light.contrast`, `color.temp`, `color.vibrance`, `detail.sharpening`), presets, "
+        "long-edge resize, quality, and export options."
     ),
     "parameters": {
         "type": "object",
@@ -459,11 +586,17 @@ ARTCRAFT_DEVELOP = {
             },
             "output_path": {
                 "type": "string",
-                "description": "Path for the developed output file (.jpg, .png, .tif, .webp, .avif, .jxl, .dng).",
+                "description": (
+                    "Path for the developed output file "
+                    "(.jpg, .png, .tif, .webp, .avif, .jxl, .dng)."
+                ),
             },
             "sliders": {
                 "type": "object",
-                "description": "Optional dict of develop control IDs to values (e.g. {'light.exposure': 0.5, 'light.contrast': 10}).",
+                "description": (
+                    "Optional dict of develop control IDs to values "
+                    "(e.g. {'light.exposure': 0.5, 'light.contrast': 10})."
+                ),
             },
             "preset": {
                 "type": "string",
@@ -483,12 +616,17 @@ ARTCRAFT_DEVELOP = {
             },
             "export_options": {
                 "type": "object",
-                "description": "Optional dict of LightCraft app.export options (e.g. {'colorSpace': 'displayP3', 'ppi': 300}).",
+                "description": (
+                    "Optional dict of LightCraft app.export options "
+                    "(e.g. {'colorSpace': 'displayP3', 'ppi': 300})."
+                ),
             },
             "allow_overwrite": {
                 "type": "boolean",
                 "default": False,
-                "description": "Allow overwriting output_path if it already exists (default false).",
+                "description": (
+                    "Allow overwriting output_path if it already exists (default false)."
+                ),
             },
             "timeout_s": {
                 "type": "number",
@@ -503,8 +641,9 @@ ARTCRAFT_DEVELOP = {
 ARTCRAFT_AUDIO_BASIC = {
     "name": "artcraft_audio_basic",
     "description": (
-        "Inspect audio metadata (`action='info'`) or non-destructively convert, resample, change bit depth, "
-        "and peak-normalize audio files (`action='convert'`) via SoundCraft (`soundcraft-cli`)."
+        "Inspect audio metadata (`action='info'`) or convert, resample, change bit depth, "
+        "and peak-normalize audio files (`action='convert'`) via SoundCraft (`soundcraft-cli`) "
+        "without altering the source."
     ),
     "parameters": {
         "type": "object",
@@ -512,7 +651,10 @@ ARTCRAFT_AUDIO_BASIC = {
             "action": {
                 "type": "string",
                 "enum": ["info", "convert"],
-                "description": "Audio operation: 'info' to probe metadata or 'convert' to write a converted audio file.",
+                "description": (
+                    "Audio operation: 'info' to probe metadata or 'convert' "
+                    "to write a converted audio file."
+                ),
             },
             "input_path": {
                 "type": "string",
@@ -535,16 +677,22 @@ ARTCRAFT_AUDIO_BASIC = {
             "normalize": {
                 "type": "boolean",
                 "default": False,
-                "description": "Normalize peak amplitude to -0.1 dBFS when converting (default false).",
+                "description": (
+                    "Normalize peak amplitude to -0.1 dBFS when converting (default false)."
+                ),
             },
             "dither": {
                 "type": "boolean",
-                "description": "Optional explicit dithering toggle (true for --dither, false for --no-dither).",
+                "description": (
+                    "Optional explicit dithering toggle (true for --dither, false for --no-dither)."
+                ),
             },
             "allow_overwrite": {
                 "type": "boolean",
                 "default": False,
-                "description": "Allow overwriting output_path if it already exists (default false).",
+                "description": (
+                    "Allow overwriting output_path if it already exists (default false)."
+                ),
             },
             "timeout_s": {
                 "type": "number",
@@ -559,9 +707,9 @@ ARTCRAFT_AUDIO_BASIC = {
 ARTCRAFT_VIDEO_BASIC = {
     "name": "artcraft_video_basic",
     "description": (
-        "Probe media containers/streams (`action='probe'`), extract a verified PNG still frame "
-        "(`action='render_frame'`), or non-destructively trim/transcode/export video (`action='export'`) "
-        "via FilmCraft (`filmcraft-cli`)."
+        "Probe media containers/streams (`action='probe'`), extract a PNG still frame "
+        "(`action='render_frame'`), or trim/transcode video (`action='export'`) via FilmCraft "
+        "(`filmcraft-cli`) without altering the source."
     ),
     "parameters": {
         "type": "object",
@@ -573,16 +721,23 @@ ARTCRAFT_VIDEO_BASIC = {
             },
             "input_path": {
                 "type": "string",
-                "description": "Path to a standalone media file (required for 'probe'; optional source for 'render_frame'/'export').",
+                "description": (
+                    "Path to a standalone media file (required for 'probe'; "
+                    "optional source for 'render_frame'/'export')."
+                ),
             },
             "project_path": {
                 "type": "string",
-                "description": "Optional path to a FilmCraft project (.fcproj) for 'render_frame' or 'export'.",
+                "description": (
+                    "Optional path to a FilmCraft project (.fcproj) for 'render_frame' or 'export'."
+                ),
             },
             "demo": {
                 "type": "boolean",
                 "default": False,
-                "description": "Use the built-in FilmCraft procedural demo project (default false).",
+                "description": (
+                    "Use the built-in FilmCraft procedural demo project (default false)."
+                ),
             },
             "output_path": {
                 "type": "string",
@@ -603,7 +758,9 @@ ARTCRAFT_VIDEO_BASIC = {
             },
             "format": {
                 "type": "string",
-                "description": "Optional export format override (e.g. 'h264', 'hevc', 'prores', 'wav', 'mp3').",
+                "description": (
+                    "Optional export format override (e.g. 'h264', 'hevc', 'prores', 'wav', 'mp3')."
+                ),
             },
             "preset": {
                 "type": "string",
@@ -627,7 +784,9 @@ ARTCRAFT_VIDEO_BASIC = {
             "allow_overwrite": {
                 "type": "boolean",
                 "default": False,
-                "description": "Allow overwriting output_path if it already exists (default false).",
+                "description": (
+                    "Allow overwriting output_path if it already exists (default false)."
+                ),
             },
             "timeout_s": {
                 "type": "number",
@@ -638,6 +797,4 @@ ARTCRAFT_VIDEO_BASIC = {
         "required": ["action"],
     },
 }
-
-
 

@@ -8,10 +8,12 @@ from pathlib import Path
 
 from PIL import Image
 
-from artcraft_plugin.verify import inspect_image, verify_edit
+from artcraft_plugin.verify import _count_changed_pixels, inspect_image, verify_edit
 
 
-def _make_png(path: Path, size: tuple[int, int] = (32, 32), color: tuple[int, int, int] = (255, 255, 255)) -> None:
+def _make_png(
+    path: Path, size: tuple[int, int] = (32, 32), color: tuple[int, int, int] = (255, 255, 255)
+) -> None:
     Image.new("RGB", size, color).save(path, format="PNG")
 
 
@@ -83,6 +85,34 @@ class TestVerify(unittest.TestCase):
             res = verify_edit(str(src), str(out))
             self.assertFalse(res["passed"])
             self.assertIn("invalid_output", res["reason"])
+
+    def test_count_changed_pixels_edge_cases(self) -> None:
+        """_count_changed_pixels handles identical, alpha-only, and multi-channel diffs."""
+        base_rgb = Image.new("RGB", (8, 8), (10, 20, 30))
+        same_rgb = Image.new("RGB", (8, 8), (10, 20, 30))
+        self.assertEqual(_count_changed_pixels(base_rgb, same_rgb), 0)
+
+        base_rgba = Image.new("RGBA", (8, 8), (10, 20, 30, 255))
+        same_rgba = Image.new("RGBA", (8, 8), (10, 20, 30, 255))
+        self.assertEqual(_count_changed_pixels(base_rgba, same_rgba), 0)
+
+        # Single-pixel alpha-only change
+        alpha_diff = base_rgba.copy()
+        alpha_diff.putpixel((3, 4), (10, 20, 30, 254))
+        self.assertEqual(_count_changed_pixels(base_rgba, alpha_diff), 1)
+
+        # Multi-channel diffs across distinct pixels
+        multi_diff = base_rgba.copy()
+        multi_diff.putpixel((0, 0), (11, 20, 30, 255))  # R changed
+        multi_diff.putpixel((1, 0), (10, 25, 35, 255))  # G + B changed (still 1 pixel)
+        multi_diff.putpixel((2, 0), (10, 20, 30, 128))  # A changed
+        self.assertEqual(_count_changed_pixels(base_rgba, multi_diff), 3)
+
+        # Cross-mode RGB vs RGBA where 2 pixels have non-255 alpha
+        cross_rgba = Image.new("RGBA", (8, 8), (10, 20, 30, 255))
+        cross_rgba.putpixel((0, 1), (10, 20, 30, 200))
+        cross_rgba.putpixel((7, 7), (99, 20, 30, 255))
+        self.assertEqual(_count_changed_pixels(base_rgb, cross_rgba), 2)
 
 
 if __name__ == "__main__":

@@ -18,7 +18,9 @@ from PIL import Image
 
 from artcraft_plugin import cli, tools
 from artcraft_plugin.discovery import find_cli_binary
+from artcraft_plugin.runner import atomic_replace_file, run_artcraft_cli
 from artcraft_plugin.suite_basics import (
+    _atomic_promote,
     filmcraft_video_basic,
     lightcraft_develop,
     soundcraft_audio_basic,
@@ -27,7 +29,7 @@ from artcraft_plugin.verify import sha256_file
 
 
 def _write_test_wav(path: Path, sample_rate: int = 44100, seconds: float = 0.1) -> None:
-    """Create a deterministic mono 16-bit PCM sine wave WAV file."""
+    """Create a mono 16-bit PCM sine wave WAV test fixture."""
     n_frames = max(1, int(sample_rate * seconds))
     samples = [
         int(12000 * math.sin(2.0 * math.pi * 440.0 * idx / sample_rate))
@@ -79,7 +81,9 @@ class TestSuiteBasicsUnit(unittest.TestCase):
             "from PIL import Image\n"
             "args = sys.argv[1:]\n"
             "out_idx = args.index('-o') + 1\n"
-            "Image.new('RGB', (100, 50), color=(200, 150, 100)).save(args[out_idx], format='JPEG')\n",
+            "Image.new('RGB', (100, 50), color=(200, 150, 100)).save(\n"
+            "    args[out_idx], format='JPEG'\n"
+            ")\n",
             encoding="utf-8",
         )
         fake_lc.chmod(fake_lc.stat().st_mode | stat.S_IEXEC)
@@ -129,7 +133,11 @@ class TestSuiteBasicsUnit(unittest.TestCase):
             "import json, shutil, sys\n"
             "cmd = sys.argv[1]\n"
             "if cmd == 'info':\n"
-            "    print(json.dumps({'bwf': None, 'channels': 1, 'format': 'Wav', 'frames': 4800, 'sample_format': 'Int16', 'sample_rate': 48000, 'seconds': 0.1}))\n"
+            "    payload = {\n"
+            "        'bwf': None, 'channels': 1, 'format': 'Wav', 'frames': 4800,\n"
+            "        'sample_format': 'Int16', 'sample_rate': 48000, 'seconds': 0.1,\n"
+            "    }\n"
+            "    print(json.dumps(payload))\n"
             "elif cmd == 'convert':\n"
             "    shutil.copyfile(sys.argv[2], sys.argv[3])\n",
             encoding="utf-8",
@@ -171,7 +179,9 @@ class TestSuiteBasicsUnit(unittest.TestCase):
         self.assertFalse(filmcraft_video_basic("render_frame", input_path=str(clip))["ok"])
 
         # Export without any source
-        self.assertFalse(filmcraft_video_basic("export", output_path=str(self.root / "o.mp4"))["ok"])
+        self.assertFalse(
+            filmcraft_video_basic("export", output_path=str(self.root / "o.mp4"))["ok"]
+        )
 
         fake_fc = self.root / "filmcraft-cli"
         fake_fc.write_text(
@@ -180,7 +190,12 @@ class TestSuiteBasicsUnit(unittest.TestCase):
             "from PIL import Image\n"
             "args = sys.argv[1:]\n"
             "if 'probe' in args:\n"
-            "    print(json.dumps({'container': 'MPEG-4', 'kind': 'Movie', 'video': {'width': 320, 'height': 180}}))\n"
+            "    info = {\n"
+            "        'container': 'MPEG-4',\n"
+            "        'kind': 'Movie',\n"
+            "        'video': {'width': 320, 'height': 180},\n"
+            "    }\n"
+            "    print(json.dumps(info))\n"
             "elif 'run' in args:\n"
             "    data = sys.stdin.read().strip().splitlines()\n"
             "    last = json.loads(data[-1])\n"
@@ -228,6 +243,96 @@ class TestSuiteBasicsUnit(unittest.TestCase):
             self.assertGreater(ex_res["size_bytes"], 0)
             self.assertEqual(sha256_file(clip), clip_sha)
 
+    def test_runner_guards_dangling_symlink_and_atomic_replace_file(self) -> None:
+        """Shared runner guards refuse dangling symlinks before mkdir and promote atomically."""
+        src = self.root / "src.png"
+        Image.new("RGB", (32, 32), color=(10, 20, 30)).save(src)
+
+        # atomic_replace_file rejects existing file and dangling symlink when allow_overwrite=False
+        staged = self.root / "staged.png"
+        staged.write_bytes(b"new-bytes")
+        dangling = self.root / "dangling.png"
+        dangling_target = self.root / "missing_target.png"
+        os.symlink(dangling_target, dangling)
+
+        with self.assertRaises(FileExistsError):
+            atomic_replace_file(staged, dangling, allow_overwrite=False)
+        self.assertTrue(os.path.islink(dangling))
+        self.assertFalse(dangling_target.exists())
+
+        with self.assertRaises(FileExistsError):
+            _atomic_promote(staged, dangling, allow_overwrite=False)
+
+        # allow_overwrite=True replaces dangling symlink atomically via os.replace
+        atomic_replace_file(staged, dangling, allow_overwrite=True)
+        self.assertFalse(os.path.islink(dangling))
+        self.assertEqual(dangling.read_bytes(), b"new-bytes")
+        self.assertFalse(dangling_target.exists())
+
+        # run_artcraft_cli checks identical paths & dangling symlinks BEFORE mkdir
+        fake_pc = self.root / "photocraft-cli"
+        fake_pc.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+        fake_pc.chmod(fake_pc.stat().st_mode | stat.S_IEXEC)
+
+        never_dir = self.root / "never_created"
+        same_target = never_dir / "img.png"
+        with patch("artcraft_plugin.runner.find_cli_binary", return_value=fake_pc):
+            res_same = run_artcraft_cli(
+                "photocraft",
+                ["--version"],
+                input_path=str(same_target),
+                output_path=str(same_target),
+            )
+            self.assertFalse(res_same["ok"])
+            self.assertIn("non_destructive_guard", res_same["error"])
+            self.assertFalse(never_dir.exists())
+
+            dangling_cli = self.root / "dangling_cli.png"
+            os.symlink(self.root / "missing_cli_target.png", dangling_cli)
+            res_dangling = run_artcraft_cli(
+                "photocraft",
+                ["--version"],
+                input_path=str(src),
+                output_path=str(dangling_cli),
+            )
+            self.assertFalse(res_dangling["ok"])
+            self.assertIn("already exists", res_dangling["error"])
+
+        # suite_basics wrappers also refuse dangling symlinks when allow_overwrite=False
+        dangling_lc = self.root / "dangling_lc.jpg"
+        os.symlink(self.root / "missing_lc_target.jpg", dangling_lc)
+        res_lc = lightcraft_develop(str(src), str(dangling_lc), allow_overwrite=False)
+        self.assertFalse(res_lc["ok"])
+        self.assertIn("already exists", res_lc["error"])
+
+        wav_in = self.root / "in_guard.wav"
+        _write_test_wav(wav_in)
+        dangling_sc = self.root / "dangling_sc.wav"
+        os.symlink(self.root / "missing_sc_target.wav", dangling_sc)
+        with patch("artcraft_plugin.suite_basics.find_cli_binary", return_value=fake_pc):
+            res_sc = soundcraft_audio_basic(
+                "convert",
+                str(wav_in),
+                output_path=str(dangling_sc),
+                allow_overwrite=False,
+            )
+        self.assertFalse(res_sc["ok"])
+        self.assertIn("already exists", res_sc["error"])
+
+        clip = self.root / "clip_guard.mp4"
+        clip.write_bytes(b"fake-mp4")
+        dangling_fc = self.root / "dangling_fc.png"
+        os.symlink(self.root / "missing_fc_target.png", dangling_fc)
+        with patch("artcraft_plugin.suite_basics.find_cli_binary", return_value=fake_pc):
+            res_fc = filmcraft_video_basic(
+                "render_frame",
+                input_path=str(clip),
+                output_path=str(dangling_fc),
+                allow_overwrite=False,
+            )
+        self.assertFalse(res_fc["ok"])
+        self.assertIn("already exists", res_fc["error"])
+
 
 class TestSuiteBasicsRealCLIs(unittest.TestCase):
     """Integration tests running against the real installed ArtCraft CLI binaries."""
@@ -266,7 +371,9 @@ class TestSuiteBasicsRealCLIs(unittest.TestCase):
 
         # Also test CLI subcommand
         out_cli = self.root / "developed_cli.png"
-        rc = cli.main(["develop", str(src), str(out_cli), "--set", "light.exposure=0.2", "--size", "120"])
+        rc = cli.main(
+            ["develop", str(src), str(out_cli), "--set", "light.exposure=0.2", "--size", "120"]
+        )
         self.assertEqual(rc, 0)
         self.assertTrue(out_cli.is_file())
         self.assertEqual(sha256_file(src), src_sha)

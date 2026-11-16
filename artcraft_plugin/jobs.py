@@ -1,19 +1,7 @@
-"""Deterministic job workspaces, checkpoint recovery, and delivery receipt tooling.
+"""Job workspaces, checkpoints, export tracking, and delivery receipts.
 
-Provides deterministic job directory structure:
-  <workspace>/<job_id>/
-    source/
-    work/
-    previews/
-    exports/
-    job.json
-
-Features:
-  - Checkpoint tracking and resuming from last verified checkpoint cleanly
-  - Recording verified export artifacts (artifact_id, sha256, path, verified: true)
-  - Delivery receipt tracking (pending, delivered, uncertain)
-  - Duplicate delivery prevention (prevents re-delivering same hash to same destination)
-  - Reconciliation of uncertain delivery before retry
+Layout under ``<workspace>/<job_id>/``:
+  source/, work/, previews/, exports/, job.json
 """
 
 from __future__ import annotations
@@ -22,6 +10,7 @@ import datetime
 import fcntl
 import json
 import os
+import re
 import shutil
 import tempfile
 import uuid
@@ -31,6 +20,27 @@ from typing import Any, Dict, Iterator, List, Optional, Tuple, Union
 from urllib.parse import urlparse
 
 from .verify import inspect_image, sha256_file
+
+_SAFE_ID_RE = re.compile(r"[A-Za-z0-9_-][A-Za-z0-9._-]*")
+
+
+def _validate_safe_id(value: str, field_name: str) -> str:
+    """Validate an identifier used in job workspace paths and metadata."""
+    if not isinstance(value, str) or not _SAFE_ID_RE.fullmatch(value) or ".." in value:
+        raise ValueError(
+            f"Invalid {field_name} {value!r}: must match [A-Za-z0-9_-][A-Za-z0-9._-]* "
+            "without path traversal or whitespace."
+        )
+    return value
+
+
+def _ensure_within_dir(target: Path, parent: Path, label: str) -> Path:
+    """Ensure ``target`` resolves strictly within ``parent``."""
+    resolved_parent = parent.resolve()
+    resolved_target = target.resolve()
+    if resolved_target == resolved_parent or not resolved_target.is_relative_to(resolved_parent):
+        raise ValueError(f"{label} escapes parent directory {resolved_parent}: {resolved_target}")
+    return target
 
 
 @contextmanager
@@ -49,7 +59,9 @@ def _job_lock(job_dir: Path) -> Iterator[None]:
 def _atomic_write_text(target: Path, content: str) -> None:
     """Write text atomically to target via temp file + fsync + os.replace."""
     target.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp_name = tempfile.mkstemp(prefix=f".{target.name}.", suffix=".tmp", dir=str(target.parent))
+    fd, tmp_name = tempfile.mkstemp(
+        prefix=f".{target.name}.", suffix=".tmp", dir=str(target.parent)
+    )
     tmp_path = Path(tmp_name)
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as handle:
@@ -124,7 +136,8 @@ def _find_protected_collision(dest_p: Path, job: Dict[str, Any]) -> Optional[str
         protected.append(("retained job source", Path(source["job_source_path"])))
     for cp in job.get("checkpoints", []):
         if cp.get("path"):
-            protected.append((f"checkpoint {cp.get('checkpoint_id', '')}".strip(), Path(cp["path"])))
+            cp_id = cp.get("checkpoint_id", "")
+            protected.append((f"checkpoint {cp_id}".strip(), Path(cp["path"])))
 
     dest_resolved = dest_p.resolve()
     dest_stat: Optional[Tuple[int, int]] = None
@@ -140,7 +153,9 @@ def _find_protected_collision(dest_p: Path, job: Dict[str, Any]) -> Optional[str
         if dest_resolved == p_resolved:
             return f"Destination '{dest_p}' resolves to protected {label} '{p}'."
         if dest_stat is not None and p_stat is not None and dest_stat == p_stat:
-            return f"Destination '{dest_p}' shares an inode (hard link) with protected {label} '{p}'."
+            return (
+                f"Destination '{dest_p}' shares an inode (hard link) with protected {label} '{p}'."
+            )
     return None
 
 
@@ -158,9 +173,11 @@ def get_default_workspace() -> Path:
 
 
 def get_job_dir(job_id: str, workspace_dir: Optional[Union[str, Path]] = None) -> Path:
-    """Return deterministic path to job directory."""
+    """Return workspace path for ``job_id``."""
+    safe_job_id = _validate_safe_id(job_id, "job_id")
     base = Path(workspace_dir).expanduser().resolve() if workspace_dir else get_default_workspace()
-    return base / str(job_id).strip()
+    job_dir = base / safe_job_id
+    return _ensure_within_dir(job_dir, base, "job_dir")
 
 
 def init_job(
@@ -169,64 +186,67 @@ def init_job(
     workspace_dir: Optional[Union[str, Path]] = None,
     metadata: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
-    """Initialize a deterministic job directory structure and job.json.
-
-    Creates subdirectories: source/, work/, previews/, exports/, and writes job.json.
-    """
+    """Initialize a job workspace directory (source/, work/, previews/, exports/, job.json)."""
     job_dir = get_job_dir(job_id, workspace_dir)
-    source_dir = job_dir / "source"
-    work_dir = job_dir / "work"
-    previews_dir = job_dir / "previews"
-    exports_dir = job_dir / "exports"
+    with _job_lock(job_dir):
+        source_dir = job_dir / "source"
+        work_dir = job_dir / "work"
+        previews_dir = job_dir / "previews"
+        exports_dir = job_dir / "exports"
 
-    for d in (source_dir, work_dir, previews_dir, exports_dir):
-        d.mkdir(parents=True, exist_ok=True)
+        for d in (source_dir, work_dir, previews_dir, exports_dir):
+            d.mkdir(parents=True, exist_ok=True)
 
-    job_file = job_dir / "job.json"
-    if job_file.is_file():
-        try:
-            return json.loads(job_file.read_text(encoding="utf-8"))
-        except Exception:
-            pass
+        job_file = job_dir / "job.json"
+        if job_file.is_file():
+            try:
+                existing = json.loads(job_file.read_text(encoding="utf-8"))
+            except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+                raise ValueError(f"Corrupt job state in {job_file}: {exc}") from exc
+            if not isinstance(existing, dict):
+                raise ValueError(f"Corrupt job state in {job_file}: expected JSON object")
+            return existing
 
-    source_info: Optional[Dict[str, Any]] = None
-    if source_path:
-        src_p = Path(source_path).expanduser().resolve()
-        if not src_p.is_file():
-            raise FileNotFoundError(f"Source file not found: {src_p}")
-        dest_src = source_dir / src_p.name
-        if dest_src != src_p:
-            shutil.copy2(src_p, dest_src)
-        source_info = {
-            "original_path": str(src_p),
-            "job_source_path": str(dest_src),
-            "sha256": sha256_file(dest_src),
-            "filename": src_p.name,
+        source_info: Optional[Dict[str, Any]] = None
+        if source_path:
+            src_p = Path(source_path).expanduser().resolve()
+            if not src_p.is_file():
+                raise FileNotFoundError(f"Source file not found: {src_p}")
+            dest_src = _ensure_within_dir(
+                source_dir / src_p.name, source_dir, "source destination"
+            )
+            if dest_src.resolve() != src_p:
+                shutil.copy2(src_p, dest_src)
+            source_info = {
+                "original_path": str(src_p),
+                "job_source_path": str(dest_src),
+                "sha256": sha256_file(dest_src),
+                "filename": src_p.name,
+            }
+
+        job_data: Dict[str, Any] = {
+            "job_id": str(job_id),
+            "version": "1.0",
+            "created_at": iso_now(),
+            "updated_at": iso_now(),
+            "status": "initialized",
+            "workspace_path": str(job_dir),
+            "source": source_info,
+            "checkpoints": [],
+            "current_checkpoint_id": None,
+            "last_verified_checkpoint_path": None,
+            "export_artifacts": {},
+            "delivery_receipts": {},
+            "retry_state": {
+                "retry_count": 0,
+                "max_retries": 3,
+                "last_error": None,
+            },
+            "metadata": metadata or {},
         }
 
-    job_data: Dict[str, Any] = {
-        "job_id": str(job_id),
-        "version": "1.0",
-        "created_at": iso_now(),
-        "updated_at": iso_now(),
-        "status": "initialized",
-        "workspace_path": str(job_dir),
-        "source": source_info,
-        "checkpoints": [],
-        "current_checkpoint_id": None,
-        "last_verified_checkpoint_path": None,
-        "export_artifacts": {},
-        "delivery_receipts": {},
-        "retry_state": {
-            "retry_count": 0,
-            "max_retries": 3,
-            "last_error": None,
-        },
-        "metadata": metadata or {},
-    }
-
-    _atomic_write_text(job_file, json.dumps(job_data, indent=2))
-    return job_data
+        _atomic_write_text(job_file, json.dumps(job_data, indent=2))
+        return job_data
 
 
 def get_job(job_id: str, workspace_dir: Optional[Union[str, Path]] = None) -> Dict[str, Any]:
@@ -235,7 +255,10 @@ def get_job(job_id: str, workspace_dir: Optional[Union[str, Path]] = None) -> Di
     job_file = job_dir / "job.json"
     if not job_file.is_file():
         raise FileNotFoundError(f"Job not found at {job_file}")
-    return json.loads(job_file.read_text(encoding="utf-8"))
+    data = json.loads(job_file.read_text(encoding="utf-8"))
+    if not isinstance(data, dict):
+        raise ValueError(f"Corrupt job.json at {job_file}: expected JSON object")
+    return data
 
 
 def _save_job(job_dir: Path, job_data: Dict[str, Any]) -> None:
@@ -254,42 +277,43 @@ def save_checkpoint(
     metadata: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Save an edit checkpoint into the job's work/ folder and update job.json."""
-    job_dir = get_job_dir(job_id, workspace_dir)
-    job = get_job(job_id, workspace_dir)
-
+    stage = _validate_safe_id(stage, "stage")
     src_p = Path(file_path).expanduser().resolve()
     if not src_p.is_file():
         raise FileNotFoundError(f"Checkpoint file not found: {src_p}")
 
-    work_dir = job_dir / "work"
-    work_dir.mkdir(parents=True, exist_ok=True)
+    job_dir = get_job_dir(job_id, workspace_dir)
+    with _job_lock(job_dir):
+        job = get_job(job_id, workspace_dir)
+        work_dir = _ensure_within_dir(job_dir / "work", job_dir, "work directory")
+        work_dir.mkdir(parents=True, exist_ok=True)
 
-    idx = len(job.get("checkpoints", [])) + 1
-    dest_name = f"cp_{idx}_{stage}_{src_p.name}"
-    dest_path = work_dir / dest_name
-    if src_p != dest_path:
-        shutil.copy2(src_p, dest_path)
+        idx = len(job.get("checkpoints", [])) + 1
+        dest_name = f"cp_{idx}_{stage}_{src_p.name}"
+        dest_path = _ensure_within_dir(work_dir / dest_name, work_dir, "checkpoint destination")
+        digest = sha256_file(src_p)
+        if src_p != dest_path.resolve():
+            _atomic_copy_verified(src_p, dest_path, digest)
 
-    digest = sha256_file(dest_path)
-    checkpoint_id = f"cp_{idx}_{stage}"
+        checkpoint_id = f"cp_{idx}_{stage}"
 
-    checkpoint_record = {
-        "checkpoint_id": checkpoint_id,
-        "stage": stage,
-        "path": str(dest_path),
-        "sha256": digest,
-        "verified": bool(verified),
-        "created_at": iso_now(),
-        "metadata": metadata or {},
-    }
+        checkpoint_record = {
+            "checkpoint_id": checkpoint_id,
+            "stage": stage,
+            "path": str(dest_path),
+            "sha256": digest,
+            "verified": bool(verified),
+            "created_at": iso_now(),
+            "metadata": metadata or {},
+        }
 
-    job.setdefault("checkpoints", []).append(checkpoint_record)
-    if verified:
-        job["current_checkpoint_id"] = checkpoint_id
-        job["last_verified_checkpoint_path"] = str(dest_path)
-        job["status"] = "checkpointed"
+        job.setdefault("checkpoints", []).append(checkpoint_record)
+        if verified:
+            job["current_checkpoint_id"] = checkpoint_id
+            job["last_verified_checkpoint_path"] = str(dest_path)
+            job["status"] = "checkpointed"
 
-    _save_job(job_dir, job)
+        _save_job(job_dir, job)
     return {
         "ok": True,
         "checkpoint": checkpoint_record,
@@ -302,7 +326,6 @@ def resume_job(
     workspace_dir: Optional[Union[str, Path]] = None,
 ) -> Dict[str, Any]:
     """Resume an interrupted job from its last verified checkpoint (or initial source)."""
-    job_dir = get_job_dir(job_id, workspace_dir)
     job = get_job(job_id, workspace_dir)
 
     checkpoints = job.get("checkpoints", [])
@@ -323,8 +346,8 @@ def resume_job(
                         "sha256": current_hash,
                         "job_id": job_id,
                         "message": (
-                            f"Resumed job {job_id} from last verified checkpoint '{cp['checkpoint_id']}' "
-                            f"(stage: {cp['stage']})."
+                            f"Resumed job {job_id} from last verified checkpoint "
+                            f"'{cp['checkpoint_id']}' (stage: {cp['stage']})."
                         ),
                     }
 
@@ -363,6 +386,7 @@ def record_export_artifact(
     metadata: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Record a verified export artifact in exports/ and job.json."""
+    artifact_id = _validate_safe_id(artifact_id, "artifact_id")
     if not verified:
         return {
             "ok": False,
@@ -375,20 +399,25 @@ def record_export_artifact(
 
     info = inspect_image(str(src_p))
     if not info.get("valid"):
+        err_msg = info.get("error", "unreadable or corrupt export file")
         return {
             "ok": False,
-            "error": f"invalid_export_image: {info.get('error', 'unreadable or corrupt export file')}",
+            "error": f"invalid_export_image: {err_msg}",
         }
 
     job_dir = get_job_dir(job_id, workspace_dir)
     with _job_lock(job_dir):
         job = get_job(job_id, workspace_dir)
-        exports_dir = job_dir / "exports"
+        exports_dir = _ensure_within_dir(job_dir / "exports", job_dir, "exports directory")
         exports_dir.mkdir(parents=True, exist_ok=True)
 
         digest = info["sha256"]
-        dest_path = exports_dir / f"{artifact_id}_{src_p.name}"
-        if src_p != dest_path:
+        dest_path = _ensure_within_dir(
+            exports_dir / f"{artifact_id}_{src_p.name}",
+            exports_dir,
+            "export destination",
+        )
+        if src_p != dest_path.resolve():
             _atomic_copy_verified(src_p, dest_path, digest)
 
         artifact_record = {
@@ -425,6 +454,10 @@ def record_delivery(
     provenance: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Record delivery receipt for an export artifact with source protection and locking."""
+    artifact_id = _validate_safe_id(artifact_id, "artifact_id")
+    if receipt_id is not None:
+        receipt_id = _validate_safe_id(receipt_id, "receipt_id")
+
     valid_statuses = {"pending", "delivered", "uncertain"}
     if status not in valid_statuses:
         return {
@@ -451,7 +484,16 @@ def record_delivery(
         art_path = Path(artifact["path"])
         receipts = job.get("delivery_receipts", {})
 
-        # Guard 1: Duplicate delivery check
+        if receipt_id is not None and receipt_id in receipts:
+            return {
+                "ok": False,
+                "error": (
+                    f"receipt_id '{receipt_id}' already exists; "
+                    "use reconcile_delivery to update it."
+                ),
+            }
+
+        # Prevent duplicate deliveries of the same content hash to the same destination
         for r in receipts.values():
             if (
                 r.get("destination") == destination
@@ -469,7 +511,7 @@ def record_delivery(
                     "receipt": r,
                 }
 
-        # Guard 2: Require reconciliation of uncertain delivery before retry
+        # Require reconciliation before retrying an uncertain delivery
         for r in receipts.values():
             if (
                 r.get("destination") == destination
@@ -486,11 +528,14 @@ def record_delivery(
                     "receipt": r,
                 }
 
-        # Guard 3: Recompute export artifact hash before publishing
+        # Re-verify export artifact integrity before publishing
         if not art_path.is_file() or sha256_file(art_path) != art_hash:
             return {
                 "ok": False,
-                "error": f"artifact_integrity_error: '{artifact_id}' is missing or changed since registration.",
+                "error": (
+                    f"artifact_integrity_error: '{artifact_id}' is missing or changed "
+                    "since registration."
+                ),
             }
 
         if is_remote:
@@ -512,8 +557,12 @@ def record_delivery(
                     "error": f"protected_path_violation: {collision}",
                 }
             if status == "delivered":
-                if dest_p.exists() and not overwrite:
-                    if not dest_p.is_file() or sha256_file(dest_p) != art_hash:
+                if os.path.lexists(dest_p) and not overwrite:
+                    if (
+                        (os.path.islink(dest_p) and not dest_p.exists())
+                        or not dest_p.is_file()
+                        or sha256_file(dest_p) != art_hash
+                    ):
                         return {
                             "ok": False,
                             "destination_exists": True,
@@ -567,6 +616,9 @@ def reconcile_delivery(
     provenance: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Reconcile an uncertain delivery receipt without assuming missing remote files failed."""
+    if receipt_id is not None:
+        receipt_id = _validate_safe_id(receipt_id, "receipt_id")
+
     job_dir = get_job_dir(job_id, workspace_dir)
     with _job_lock(job_dir):
         job = get_job(job_id, workspace_dir)
@@ -595,9 +647,15 @@ def reconcile_delivery(
         )
 
         if is_remote:
-            if confirmed_status in ("delivered", "failed") and isinstance(provenance, dict) and provenance:
+            if (
+                confirmed_status in ("delivered", "failed")
+                and isinstance(provenance, dict)
+                and provenance
+            ):
                 reconciled_status = confirmed_status
-                recon_notes = notes or f"Remote reconciliation ({confirmed_status}) with recorded provenance."
+                recon_notes = notes or (
+                    f"Remote reconciliation ({confirmed_status}) with recorded provenance."
+                )
                 target_rcpt["reconciliation_provenance"] = provenance
             else:
                 return {
@@ -622,7 +680,9 @@ def reconcile_delivery(
                 actual_hash = sha256_file(dest_p)
                 if actual_hash == expected_hash:
                     reconciled_status = "delivered"
-                    recon_notes = notes or "Reconciled: Destination file exists and matches artifact SHA-256."
+                    recon_notes = notes or (
+                        "Reconciled: Destination file exists and matches artifact SHA-256."
+                    )
                 else:
                     reconciled_status = "failed"
                     recon_notes = notes or (
@@ -631,7 +691,9 @@ def reconcile_delivery(
                     )
             else:
                 reconciled_status = "failed"
-                recon_notes = notes or "Reconciled: Local destination file not found. Cleared for safe retry."
+                recon_notes = notes or (
+                    "Reconciled: Local destination file not found. Cleared for safe retry."
+                )
 
         target_rcpt["status"] = reconciled_status
         target_rcpt["reconciled"] = True

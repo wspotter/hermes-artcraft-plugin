@@ -12,13 +12,13 @@ metadata:
     related_skills: [photo-restoration, photo-inspection, recipe-enlargement]
 ---
 
-# Recipe: Sharpening Skill
+# Recipe: Sharpening
 
-Restore crisp edge acutance to mildly soft photographs or scans using `artcraft_restore_step` (`recipe="sharpening"`) or `artcraft_develop` while avoiding bright edge halos and film-grain amplification.
+Restore crisp edge acutance to slightly soft photos or scans using `artcraft_restore_step` (`recipe="sharpening"`) or `artcraft_develop` while avoiding bright edge halos and grain amplification.
 
 ## When to Use
 
-- Mild optical softness or scanner MTF loss where edge transitions need restrained crispness without ringing artifacts.
+- Mild optical softness or scanner softness where edges benefit from restrained crispness without ringing artifacts.
 
 ## Prerequisites
 
@@ -57,12 +57,12 @@ hermes artcraft develop <work_dir>/source/photo.png <work_dir>/work/step_sharpen
 
 1. Set `amount` between `30` and `80` (default `50`, safe maximum `120`).
 2. Set `radius` between `0.6` and `1.5` (default `1.0`, safe maximum `2.2`).
-3. Set `threshold` between `1` and `6` (default `2`) so smooth sky and skin grain are not sharpened into texture noise.
+3. Set `threshold` between `1` and `6` (default `2`) so smooth sky and skin grain are not oversharpened.
 
 ## Pitfalls
 
-- Stop and return `status: "needs_decision"` if `amount > 120`, `radius > 2.2`, if bright or dark halos appear along high-contrast boundaries, or if the image has severe out-of-focus blur.
+- `artcraft_restore_step` stops and returns `status: "needs_decision"` if `amount > 120` or `radius > 2.2`. Also pause if halos appear along high-contrast edges or if the photo has heavy out-of-focus blur.
 
 ## Verification
 
-- Inspect 1:1 native crops along high-contrast edges and flat tonal areas in `checkpoint_dir` to confirm improved acutance with zero haloing.
+- Inspect 1:1 native crops along high-contrast edges and flat tonal areas in `checkpoint_dir` to confirm cleaner edges without halos.

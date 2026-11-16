@@ -12,18 +12,18 @@ metadata:
     related_skills: [artcraft-router, photo-restoration, print-preparation]
 ---
 
-# Photo Inspection Skill
+# Photo Inspection
 
-Inspect a photograph visually and metrically before applying any restoration, development, or print formatting. Generates a bounded whole-photo preview, 1:1 native-resolution crops, effective print PPI ratings, and measured tonal/sharpness clues without altering the source file.
+Inspect a photograph visually and metrically before editing, developing, or sizing it for print. Generates a downscaled whole-photo preview, 1:1 native crops, print PPI estimates, and tonal/sharpness/noise stats without touching the source file.
 
 ## When to Use
 
 - Before any photo restoration, spot healing, tonal adjustment, or print preparation task.
-- Determining whether a photograph has genuine defects or should be left untouched.
+- Deciding whether an image actually has defects or should be left untouched.
 
 ## Prerequisites
 
-- Pillow available in the plugin Python environment (`artcraft_status`).
+- Pillow installed in the plugin Python environment (`artcraft_status`).
 
 ## How to Run
 
@@ -48,34 +48,30 @@ hermes artcraft inspect <work_dir>/source/photo.png \
 
 ## Procedure
 
-1. **Generate inspection artifacts**: Call `artcraft_prepare_inspection` to produce:
-   - **Whole-photo preview**: Bounded image for composition and overall tonal balance.
-   - **Native-resolution crops (1:1 pixels)**: Center and corner crops (plus custom regions) without resampling.
-   - **Dimensions & color profile**: Exact pixel dimensions, orientation, aspect ratio, and embedded ICC profile name.
-   - **Effective print PPI**: Calculated PPI across standard sheet sizes (8×10, 11×14, 5×7, 4×6, 16×20).
-   - **Measured clues**: Highlight/shadow clipping percentages, luminance dynamic range, sharpness score, and noise estimate.
-2. **Examine five visual zones**:
-   - **Faces and skin**: Distinguish authentic freckles, wrinkles, and beauty marks from emulsion pits or dust specks.
-   - **Lettering and fine textures**: Check edge crispness on signs, fabric weave, and architectural details.
-   - **High-contrast edges**: Check for chromatic aberration, optical flare, or prior sharpening halos.
-   - **Smooth areas**: Inspect sky and backdrops for scratches, sensor dust, banding, or blotchy chroma noise.
-   - **Corners and borders**: Check for vignetting, paper folds, emulsion tears, or scanner borders.
-3. **Distinguish defects from authentic scene features**:
+1. Run `artcraft_prepare_inspection` to generate the whole-photo preview, 1:1 center and corner crops (plus any custom `regions`), image dimensions and ICC profile info, `print_resolution` estimates (8x10, 11x14, 5x7, 4x6, 16x20), and `measured_clues` (endpoint clipping, luminance range, Laplacian sharpness, smooth-patch noise).
+2. Review five areas across the preview and 1:1 crops:
+   - Faces and skin: separate real freckles, wrinkles, and beauty marks from dust or emulsion pits.
+   - Lettering and fine textures: check edge crispness on signs, fabric weave, and architecture.
+   - High-contrast edges: look for chromatic aberration, lens flare, or prior sharpening halos.
+   - Smooth areas: check skies and backdrops for scratches, sensor dust, banding, or chroma blotches.
+   - Corners and borders: check for vignetting, paper folds, tears, or scanner borders.
+3. Separate real scene details from damage:
 
 | Feature | Authentic Feature (Leave Untouched) | Actionable Defect (Record for Repair) |
 |---|---|---|
-| **Linear marks** | Wires, tree branches, seams, wrinkles following scene perspective. | Scratches cutting erratically across texture boundaries. |
-| **Texture & grain** | Uniform, luminance-coherent organic film grain. | Chromatic blotches, hot pixels, JPEG blocks, or scanner banding. |
-| **High highlights** | Catchlights in eyes, sun reflections, bright lamps, snow. | Blown-out highlights where expected texture is clipped at 255. |
-| **Deep shadows** | Silhouettes, night scenes, dark suits, intentional chiaroscuro. | Crushed shadows where detail is clipped at 0 from bad scanning. |
+| Linear marks | Wires, tree branches, seams, wrinkles following perspective | Scratches cutting across texture boundaries |
+| Texture and grain | Uniform, luminance-coherent organic film grain | Chromatic blotches, hot pixels, JPEG blocks, scanner banding |
+| Highlights | Catchlights in eyes, sun reflections, bright lamps, snow | Blown-out regions where expected detail clips at 255 |
+| Shadows | Silhouettes, night scenes, dark clothing, deep contrast | Crushed shadows clipped at 0 from poor scanning |
 
-4. **Record suspected issues**: Log each defect with `issue_type`, `location` (`[x, y, width, height]` in source pixels), `confidence` (`high`, `medium`, `low`), and `recommended_action` (`leave_untouched`, `photocraft_spot_heal`, `tonal_correction`, or `clarify_with_user`).
+4. Log each suspected defect with `issue_type`, `location` (`[x, y, width, height]` in source pixels), `confidence` (`high`, `medium`, `low`), and `recommended_action` (`leave_untouched`, `photocraft_spot_heal`, `tonal_correction`, or `clarify_with_user`).
 
 ## Pitfalls
 
-- If no actionable defects exist, recommend leaving the photograph untouched; unnecessary edits degrade authenticity.
-- If a defect crosses an eye, mouth, or critical lettering, do not guess—record the coordinates and request operator clarification.
+- If no real defects exist, recommend leaving the photograph untouched rather than over-processing it.
+- Note the `measurement_limits` returned in `measured_clues`: clipping stats cannot tell specular highlights or deep shadows apart from crushed detail, and sharpness scores drop naturally with shallow depth of field.
+- If a defect crosses an eye, mouth, or critical lettering, do not guess. Record the coordinates and ask the user how to proceed.
 
 ## Verification
 
-- Confirm `artcraft_prepare_inspection` returns `source_sha256` alongside existing file paths for the preview image and all 1:1 native crops.
+- Confirm `artcraft_prepare_inspection` returns `source.sha256` and valid file paths under `inspection_artifacts.whole_photo_preview.path` and `inspection_artifacts.native_resolution_crops`.

@@ -12,14 +12,14 @@ metadata:
     related_skills: [photo-restoration, photocraft-cli-edits, photo-inspection]
 ---
 
-# Recipe: Dust and Scratches Skill
+# Recipe: Dust and Scratches
 
-Remove isolated dust specks, hairs, and emulsion scratches using localized `photocraft_spot_heal` or `artcraft_restore_step` (`recipe="dust_and_scratches"`) while preserving surrounding grain and edge acutance.
+Remove isolated dust specks, hairs, and emulsion scratches using localized `photocraft_spot_heal` or `artcraft_restore_step` (`recipe="dust_and_scratches"`) while keeping surrounding film grain and sharp edges intact.
 
 ## When to Use
 
-- High-contrast, sharp-edged blemishes or scratches that cut across natural texture boundaries.
-- Defects located away from critical facial identity features or fine lettering.
+- Sharp, high-contrast specks or scratches that cut across natural scene textures.
+- Defects located away from critical facial features or fine lettering.
 
 ## Prerequisites
 
@@ -47,15 +47,16 @@ Remove isolated dust specks, hairs, and emulsion scratches using localized `phot
 
 ## Procedure
 
-1. Verify that the mark is an actual scratch or dust speck rather than an authentic scene feature (wires, branches, seams, whiskers, or wrinkles).
-2. Prefer localized spot healing (`photocraft_spot_heal` or `artcraft_restore_step` with `points`, `size` `4..24` px, and tight `region`).
-3. For dense area dust only, use filter parameters `radius` `1..2` (safe max `3`) and `threshold` `10..40` so subtle grain and edges are not blurred.
+1. Confirm the mark is actually dust or a scratch rather than part of the scene (wires, tree branches, seams, whiskers, or wrinkles).
+2. Prefer localized spot healing (`photocraft_spot_heal` or `artcraft_restore_step` with `points`, `size` `4..24` px, and a tight `region`).
+3. Only for widespread fine dust, omit `points`/`region` to run the filter path with `radius` `1..2` (safe max `3`) and `threshold` `10..40` so grain and edges stay crisp.
 
 ## Pitfalls
 
-- Stop and return `status: "needs_decision"` if the defect crosses eyes, pupils, lips, teeth, or important lettering, or if the damaged area is too large for patch blending without inventing content.
-- Avoid smeared repairs: `artcraft_build_review` flags repairs where interior pixel variance collapses by more than 80%.
+- Stop and ask the user (or pass `reconstruct_missing=true` / `content_type="missing_face"` so `artcraft_restore_step` returns `status: "needs_decision"`) if a defect crosses eyes, pupils, lips, teeth, or important lettering, or if the damaged gap is too large to patch cleanly.
+- Avoid smeared patches: `artcraft_build_review` flags repairs where interior texture collapses (`>= 80%` Laplacian drop or `>= 85%` variance drop).
 
 ## Verification
 
-- Confirm zero changed pixels outside `region` (`outside_region_changed_pixels == 0`) and inspect 1:1 native crops to verify surrounding texture remains sharp.
+- `photocraft_spot_heal` (and `artcraft_restore_step` when passed both `points` and `region`) verifies `outside_pixels == 0` and rejects edits that alter pixels outside `region`.
+- Inspect 1:1 native crops in `checkpoint_dir` to confirm surrounding grain and edges stayed sharp.

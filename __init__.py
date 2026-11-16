@@ -5,11 +5,14 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from .artcraft_plugin import cli, schemas, tools
+if __package__:
+    from .artcraft_plugin import cli, schemas, tools
+else:
+    from artcraft_plugin import cli, schemas, tools
 
 
 def register(ctx: Any) -> None:
-    """Register ArtCraft tools and CLI subcommands with Hermes PluginManager."""
+    """Register ArtCraft tools, CLI commands, and bundled skills with Hermes."""
     ctx.register_tool(
         name="artcraft_status",
         toolset="artcraft",
@@ -105,9 +108,9 @@ def register(ctx: Any) -> None:
     if hasattr(ctx, "register_cli_command"):
         ctx.register_cli_command(
             "artcraft",
-            help="Inspect ArtCraft CLIs and verify edited images",
+            help="Inspect ArtCraft CLIs and run non-destructive media workflows",
             setup_fn=cli.register_cli,
-            description="Inspect ArtCraft CLIs and verify edited images",
+            description="Inspect ArtCraft CLIs and run non-destructive media workflows",
         )
 
     if hasattr(ctx, "register_skill"):

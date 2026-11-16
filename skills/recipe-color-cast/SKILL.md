@@ -12,14 +12,14 @@ metadata:
     related_skills: [photo-restoration, photo-inspection, lightcraft-basics]
 ---
 
-# Recipe: Color Cast Skill
+# Recipe: Color Cast
 
-Neutralize unwanted overall color tints (yellow aged paper, green fluorescent cast, or cyan dye fading) using `artcraft_restore_step` (`recipe="color_cast"`) or `artcraft_develop` while preserving natural skin warmth and luminosity.
+Neutralize unwanted overall color tints (yellowed paper, green fluorescent cast, or cyan dye shift) using `artcraft_restore_step` (`recipe="color_cast"`) or `artcraft_develop` while keeping skin tones and luminosity natural.
 
 ## When to Use
 
-- Neutral gray elements (white collars, concrete, neutral backdrops) show a measurable chromatic imbalance across red, green, and blue channels.
-- The tint is technical degradation rather than intentional golden-hour lighting or deliberate sepia toning.
+- Neutral gray areas (white collars, concrete, gray backdrops) show an obvious RGB channel tint.
+- The color shift comes from aging, dye fading, or mixed lighting rather than intentional golden-hour warmth or sepia toning.
 
 ## Prerequisites
 
@@ -55,13 +55,14 @@ hermes artcraft develop <work_dir>/source/photo.png <work_dir>/work/step_color_c
 ## Procedure
 
 1. Keep `midtones` `[cyan_red, magenta_green, yellow_blue]` within `-25` to `+25` for typical shifts (safe maximum absolute shift: `45`).
-2. Keep `preserveLuminosity: true` to prevent darkening or blowing out tonal values.
-3. Keep `shadows` and `highlights` at `[0, 0, 0]` unless subtle counter-balancing (`-15` to `+15`) is required.
+2. Keep `preserveLuminosity: true` so correcting color balance does not darken shadows or clip highlights.
+3. Keep `shadows` and `highlights` at `[0, 0, 0]` unless mild counter-balancing (`-15` to `+15`) is needed.
 
 ## Pitfalls
 
-- Stop and return `status: "needs_decision"` if a channel shift `> 45` is requested, if skin tones shift toward chalky gray, green, or purple, or if the photograph has intentional artistic sepia toning.
+- `artcraft_restore_step` stops and returns `status: "needs_decision"` automatically if any `midtones` shift exceeds `+/-45`.
+- Pause and ask the user if skin tones shift toward chalky gray, green, or purple, or if the image appears to have intentional sepia toning.
 
 ## Verification
 
-- Inspect 1:1 native crops of skin tones and known neutral references alongside print-scale comparison crops in `checkpoint_dir`.
+- Inspect 1:1 native crops of skin tones and neutral grays alongside print-scale comparison crops in `checkpoint_dir`.

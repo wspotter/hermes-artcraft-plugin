@@ -1,10 +1,9 @@
-"""Unit tests for ArtCraft restoration recipes, checkpointing, crops, and Stop/Ask Gate."""
+"""Tests for ArtCraft restoration recipes, checkpointing, crops, and confirmation gate."""
 
 from __future__ import annotations
 
 import json
 import os
-import shutil
 import tempfile
 import unittest
 from pathlib import Path
@@ -15,17 +14,10 @@ from PIL import Image, ImageDraw
 
 from artcraft_plugin.cli import main as cli_main
 from artcraft_plugin.restore import (
-    SAFE_BOUNDS,
     SUPPORTED_RECIPES,
     UNSUPPORTED_OPERATIONS,
-    apply_color_cast,
-    apply_dust_and_scratches,
-    apply_enlargement,
-    apply_faded_tones,
-    apply_noise_and_grain,
-    apply_sharpening,
+    _record_checkpoint,
     check_stop_ask_gate,
-    generate_before_after_crops,
     get_checkpoint,
     list_checkpoints,
     restore_step,
@@ -52,7 +44,11 @@ class TestRestorationRecipes(unittest.TestCase):
         draw = ImageDraw.Draw(im)
         # Add a high-contrast diagonal feature and circle
         draw.line([0, 0, size[0], size[1]], fill=(240, 240, 240), width=4)
-        draw.ellipse([size[0] // 4, size[1] // 4, 3 * size[0] // 4, 3 * size[1] // 4], outline=(40, 40, 40), width=3)
+        draw.ellipse(
+            [size[0] // 4, size[1] // 4, 3 * size[0] // 4, 3 * size[1] // 4],
+            outline=(40, 40, 40),
+            width=3,
+        )
         im.save(path, format="PNG")
         return path
 
@@ -68,10 +64,6 @@ class TestRestorationRecipes(unittest.TestCase):
         self.assertIn("reconstruct_missing_face", UNSUPPORTED_OPERATIONS)
         self.assertIn("reconstruct_missing_lettering", UNSUPPORTED_OPERATIONS)
         self.assertIn("generative_inpainting_hallucination", UNSUPPORTED_OPERATIONS)
-
-    # =========================================================================
-    # STOP / ASK GATE TESTS
-    # =========================================================================
 
     def test_stop_ask_gate_reconstruct_missing_flag(self) -> None:
         """Gate stops when reconstruct_missing=True is requested and leaves original untouched."""
@@ -161,10 +153,6 @@ class TestRestorationRecipes(unittest.TestCase):
         self.assertIn("scale", res_scale["reason"].lower())
         self.assertFalse(out.exists())
 
-    # =========================================================================
-    # RECIPE 1: FADED TONES
-    # =========================================================================
-
     def test_recipe_faded_tones(self) -> None:
         """Gentle tonal correction preserving highlight and shadow detail."""
         src = self._create_test_image("src_faded.png", (200, 200), (130, 130, 130))
@@ -189,10 +177,6 @@ class TestRestorationRecipes(unittest.TestCase):
         self.assertEqual(len(manifest), 1)
         self.assertEqual(manifest[0]["recipe"], "faded_tones")
 
-    # =========================================================================
-    # RECIPE 2: COLOR CAST
-    # =========================================================================
-
     def test_recipe_color_cast(self) -> None:
         """Neutral-balance and color adjustment preserving believable skin/warmth."""
         # Warm/yellow cast test image
@@ -213,10 +197,6 @@ class TestRestorationRecipes(unittest.TestCase):
         self.assertTrue(out.exists())
         self.assertGreater(res["diff"]["changed_pixels"], 0)
         self.assertTrue(Path(res["crops"][0]["native"]["comparison_strip_path"]).exists())
-
-    # =========================================================================
-    # RECIPE 3: DUST AND SCRATCHES
-    # =========================================================================
 
     def test_recipe_dust_and_scratches_spot_heal(self) -> None:
         """Localized healing preserving nearby edges with 0 pixels changed outside region."""
@@ -262,10 +242,6 @@ class TestRestorationRecipes(unittest.TestCase):
         self.assertTrue(out.exists())
         self.assertGreater(res["diff"]["changed_pixels"], 0)
 
-    # =========================================================================
-    # RECIPE 4: NOISE AND GRAIN
-    # =========================================================================
-
     def test_recipe_noise_and_grain(self) -> None:
         """Modest selective reduction retaining detail and texture."""
         src_path = self.root / "src_noise.png"
@@ -286,10 +262,6 @@ class TestRestorationRecipes(unittest.TestCase):
         self.assertTrue(out.exists())
         self.assertGreater(res["diff"]["changed_pixels"], 0)
 
-    # =========================================================================
-    # RECIPE 5: SHARPENING
-    # =========================================================================
-
     def test_recipe_sharpening(self) -> None:
         """Restrained sharpening avoiding distracting halos and artifacts."""
         src = self._create_test_image("src_soft.png", (200, 200))
@@ -304,10 +276,6 @@ class TestRestorationRecipes(unittest.TestCase):
         self.assertTrue(res["ok"])
         self.assertTrue(out.exists())
         self.assertGreater(res["diff"]["changed_pixels"], 0)
-
-    # =========================================================================
-    # RECIPE 6: ENLARGEMENT
-    # =========================================================================
 
     def test_recipe_enlargement(self) -> None:
         """Proportional enlargement + output sharpening preserving composition."""
@@ -324,10 +292,6 @@ class TestRestorationRecipes(unittest.TestCase):
         self.assertTrue(out.exists())
         with Image.open(out) as im_out:
             self.assertEqual((im_out.width, im_out.height), (400, 500))
-
-    # =========================================================================
-    # CHECKPOINTS & BEFORE/AFTER CROPS
-    # =========================================================================
 
     def test_checkpoint_manifest_and_query(self) -> None:
         """Checkpoint manifest records sequential steps and supports queries."""
@@ -401,12 +365,8 @@ class TestRestorationRecipes(unittest.TestCase):
         self.assertTrue(Path(c["print_scale"]["comparison_strip_path"]).exists())
         self.assertEqual(c["print_scale"]["ppi"], 300)
 
-    # =========================================================================
-    # CLI SUBCOMMAND TESTS
-    # =========================================================================
-
     def test_cli_restore_subcommand(self) -> None:
-        """CLI subcommand `hermes artcraft restore` runs recipe and outputs JSON."""
+        """CLI `restore` subcommand runs a recipe and writes output."""
         src = self._create_test_image("src_cli_rest.png", (200, 200))
         out = self.root / "out_cli_rest.png"
 
@@ -418,7 +378,7 @@ class TestRestorationRecipes(unittest.TestCase):
         self.assertTrue(out.exists())
 
     def test_cli_restore_gate_exit_code(self) -> None:
-        """CLI returns exit code 2 when Stop/Ask Gate triggers."""
+        """CLI returns exit code 2 when confirmation gate triggers."""
         src = self._create_test_image("src_cli_gate.png", (200, 200))
         out = self.root / "out_cli_gate.png"
 
@@ -430,7 +390,7 @@ class TestRestorationRecipes(unittest.TestCase):
         self.assertFalse(out.exists())
 
     def test_cli_checkpoint_subcommand(self) -> None:
-        """CLI subcommand `hermes artcraft checkpoint` lists checkpoints."""
+        """CLI `checkpoint` subcommand lists recorded checkpoints."""
         src = self._create_test_image("src_cli_cp.png", (200, 200))
         out = self.root / "out_cli_cp.png"
         cp_dir = self.root / "cli_checkpoints"
@@ -445,10 +405,6 @@ class TestRestorationRecipes(unittest.TestCase):
         code = cli_main(["checkpoint", "list", str(cp_dir)])
         self.assertEqual(code, 0)
 
-    # =========================================================================
-    # SAFETY GUARDS
-    # =========================================================================
-
     def test_safety_guards_identical_paths_and_missing_input(self) -> None:
         """Refuses identical input/output paths and non-existent input."""
         src = self._create_test_image("src_guard.png")
@@ -459,9 +415,182 @@ class TestRestorationRecipes(unittest.TestCase):
         self.assertIn("distinct", res_ident["error"])
 
         # Missing input
-        res_miss = restore_step(input_path=self.root / "nonexistent.png", output_path=self.root / "out.png", recipe="faded_tones")
+        res_miss = restore_step(
+            input_path=self.root / "nonexistent.png",
+            output_path=self.root / "out.png",
+            recipe="faded_tones",
+        )
         self.assertFalse(res_miss["ok"])
         self.assertIn("does not exist", res_miss["error"])
+
+    def test_stop_ask_gate_faded_tones_gamma_and_invalid_numeric(self) -> None:
+        """Gate stops on extreme gamma values and rejects invalid numeric gamma."""
+        src = self._create_test_image("src_gamma.png")
+        out = self.root / "out_gamma.png"
+
+        for extreme_gamma in (0.4, 2.5):
+            with self.subTest(gamma=extreme_gamma):
+                gate = check_stop_ask_gate("faded_tones", {"gamma": extreme_gamma})
+                self.assertIsNotNone(gate)
+                self.assertEqual(gate["status"], "needs_decision")
+
+                res = restore_step(
+                    input_path=src,
+                    output_path=out,
+                    recipe="faded_tones",
+                    parameters={"gamma": extreme_gamma},
+                )
+                self.assertFalse(res["ok"])
+                self.assertEqual(res["status"], "needs_decision")
+                self.assertFalse(os.path.lexists(out))
+
+        with self.assertRaises(ValueError):
+            check_stop_ask_gate("faded_tones", {"gamma": "bad"})
+        with self.assertRaises(ValueError):
+            check_stop_ask_gate("faded_tones", {"gamma": float("nan")})
+
+        res_invalid = restore_step(
+            input_path=src,
+            output_path=out,
+            recipe="faded_tones",
+            parameters={"gamma": "bad"},
+        )
+        self.assertFalse(res_invalid["ok"])
+        self.assertEqual(res_invalid["status"], "error")
+        self.assertFalse(os.path.lexists(out))
+
+    def test_stop_ask_gate_noise_and_grain_or_bounds(self) -> None:
+        """Gate stops if either noise strength exceeds max OR preserve_details is below min."""
+        src = self._create_test_image("src_noise_gate.png")
+        out = self.root / "out_noise_gate.png"
+
+        # High strength with default preserve_details=70 must still trigger gate
+        res_high_str = restore_step(
+            input_path=src,
+            output_path=out,
+            recipe="noise_and_grain",
+            parameters={"strength": 10},
+        )
+        self.assertFalse(res_high_str["ok"])
+        self.assertEqual(res_high_str["status"], "needs_decision")
+        self.assertFalse(os.path.lexists(out))
+
+        # Moderate strength with very low preserve_details must trigger gate
+        res_low_detail = restore_step(
+            input_path=src,
+            output_path=out,
+            recipe="noise_and_grain",
+            parameters={"strength": 4, "preserve_details": 20},
+        )
+        self.assertFalse(res_low_detail["ok"])
+        self.assertEqual(res_low_detail["status"], "needs_decision")
+        self.assertFalse(os.path.lexists(out))
+
+    def test_enlargement_rejects_non_positive_scale_or_dimensions(self) -> None:
+        """Enlargement rejects scale <= 0, width <= 0, or height <= 0 before CLI execution."""
+        src = self._create_test_image("src_enlarge_bad.png")
+        out = self.root / "out_enlarge_bad.png"
+        cp_dir = self.root / "cp_enlarge_bad"
+
+        for bad_params in ({"scale": 0}, {"scale": -1.5}, {"width": 0}, {"height": -10}):
+            with self.subTest(params=bad_params):
+                with self.assertRaises(ValueError):
+                    check_stop_ask_gate("enlargement", bad_params)
+                with patch("artcraft_plugin.restore.run_artcraft_cli") as mock_cli:
+                    res = restore_step(
+                        input_path=src,
+                        output_path=out,
+                        recipe="enlargement",
+                        parameters=bad_params,
+                        checkpoint_dir=cp_dir,
+                    )
+                self.assertFalse(res["ok"])
+                mock_cli.assert_not_called()
+                self.assertFalse(os.path.lexists(out))
+                self.assertFalse(cp_dir.exists())
+
+    def test_record_checkpoint_corrupt_manifest_fails_without_wipe(self) -> None:
+        """Corrupt or non-list manifest.json raises ValueError without overwriting history."""
+        src = self._create_test_image("src_cp.png", (64, 64))
+        out = self._create_test_image("out_cp.png", (64, 64), color=(150, 150, 150))
+        cp_dir = self.root / "corrupt_cp"
+        cp_dir.mkdir(parents=True, exist_ok=True)
+        manifest_path = cp_dir / "manifest.json"
+
+        for payload in ("{not valid json", '{"not": "a list"}'):
+            with self.subTest(payload=payload):
+                manifest_path.write_text(payload, encoding="utf-8")
+                with self.assertRaises(ValueError):
+                    _record_checkpoint(
+                        cp_dir,
+                        step_index=1,
+                        step_name="step_001_faded",
+                        recipe="faded_tones",
+                        input_path=str(src),
+                        output_path=str(out),
+                        parameters={},
+                        crops=[],
+                        diff_info={"changed_pixels": 1, "total_pixels": 4096, "changed_ratio": 0.0},
+                    )
+                self.assertEqual(manifest_path.read_text(encoding="utf-8"), payload)
+
+    def test_restore_step_guards_dangling_symlink_and_symlink_to_input(self) -> None:
+        """restore_step refuses dangling symlinks and symlinks resolving to input_path."""
+        src = self._create_test_image("src_sym.png", (128, 128))
+        src_sha = sha256_file(src)
+        cp_dir = self.root / "sym_checkpoints"
+
+        # Dangling symlink output must be refused before creating checkpoint dir
+        dangling = self.root / "dangling_out.png"
+        dangling_target = self.root / "missing_target.png"
+        os.symlink(dangling_target, dangling)
+
+        res_dangling = restore_step(
+            input_path=src,
+            output_path=dangling,
+            recipe="faded_tones",
+            checkpoint_dir=cp_dir,
+            allow_overwrite=False,
+        )
+        self.assertFalse(res_dangling["ok"])
+        self.assertIn("exists", res_dangling["error"])
+        self.assertFalse(cp_dir.exists())
+        self.assertTrue(os.path.islink(dangling))
+        self.assertFalse(dangling_target.exists())
+
+        # Symlink pointing to src must be refused even when allow_overwrite=True
+        sym_to_src = self.root / "alias_to_src.png"
+        os.symlink(src, sym_to_src)
+        res_alias = restore_step(
+            input_path=src,
+            output_path=sym_to_src,
+            recipe="faded_tones",
+            checkpoint_dir=cp_dir,
+            allow_overwrite=True,
+        )
+        self.assertFalse(res_alias["ok"])
+        self.assertIn("distinct", res_alias["error"])
+        self.assertEqual(sha256_file(src), src_sha)
+
+        # allow_overwrite=True replaces dangling symlink atomically without creating target
+        res_ok = restore_step(
+            input_path=src,
+            output_path=dangling,
+            recipe="faded_tones",
+            checkpoint_dir=cp_dir,
+            allow_overwrite=True,
+        )
+        self.assertTrue(res_ok["ok"], res_ok)
+        self.assertFalse(dangling_target.exists())
+        self.assertFalse(os.path.islink(dangling))
+        self.assertTrue(dangling.is_file())
+
+    def test_color_cast_rejects_nan_or_inf_midtones(self) -> None:
+        """color_cast rejects non-finite NaN/Inf midtone values instead of bypassing gate."""
+        for bad in (float("nan"), float("inf"), float("-inf")):
+            with self.subTest(value=bad):
+                with self.assertRaises(ValueError):
+                    check_stop_ask_gate("color_cast", {"midtones": [0, bad, 0]})
 
 
 if __name__ == "__main__":
