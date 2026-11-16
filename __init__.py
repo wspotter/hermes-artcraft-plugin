@@ -104,6 +104,12 @@ def register(ctx: Any) -> None:
         schema=schemas.ARTCRAFT_VIDEO_BASIC,
         handler=tools.artcraft_video_basic,
     )
+    ctx.register_tool(
+        name="artcraft_recipe",
+        toolset="artcraft",
+        schema=schemas.ARTCRAFT_RECIPE,
+        handler=tools.artcraft_recipe,
+    )
 
     if hasattr(ctx, "register_cli_command"):
         ctx.register_cli_command(

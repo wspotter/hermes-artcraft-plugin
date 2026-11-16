@@ -140,6 +140,7 @@ _STANDALONE_PILLOW_TOOLS: tuple[str, ...] = (
     "artcraft_checkpoint",
     "artcraft_build_review",
     "artcraft_job",
+    "artcraft_recipe",
 )
 
 _RESTORE_RECIPES: tuple[str, ...] = (

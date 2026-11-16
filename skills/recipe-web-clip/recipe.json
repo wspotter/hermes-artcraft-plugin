@@ -1,0 +1,57 @@
+{
+  "schema_version": "1.0",
+  "name": "recipe-web-clip",
+  "title": "Web Clip Export",
+  "description": "Probe, extract a verification frame, and export a web H.264 MP4 via FilmCraft.",
+  "version": "0.1.0",
+  "author": "wspotter",
+  "license": "MIT",
+  "app": "filmcraft",
+  "media_type": "video",
+  "default_output_suffix": ".mp4",
+  "parameters": {
+    "preview_seconds": {"type": "number", "default": 0.0},
+    "start_seconds": {"type": "number", "default": null},
+    "end_seconds": {"type": "number", "default": null},
+    "format": {"type": "string", "default": "h264"},
+    "quality": {"type": "integer", "default": 85},
+    "scale": {"type": "number", "default": 1.0},
+    "no_audio": {"type": "boolean", "default": false}
+  },
+  "steps": [
+    {
+      "id": "probe",
+      "tool": "artcraft_video_basic",
+      "args": {
+        "action": "probe",
+        "input_path": "{input}"
+      }
+    },
+    {
+      "id": "preview",
+      "tool": "artcraft_video_basic",
+      "args": {
+        "action": "render_frame",
+        "input_path": "{input}",
+        "output_path": "{work_dir}/preview_frame.png",
+        "seconds": "{params.preview_seconds}",
+        "allow_overwrite": true
+      }
+    },
+    {
+      "id": "export",
+      "tool": "artcraft_video_basic",
+      "args": {
+        "action": "export",
+        "input_path": "{input}",
+        "output_path": "{output}",
+        "start_seconds": "{params.start_seconds}",
+        "end_seconds": "{params.end_seconds}",
+        "format": "{params.format}",
+        "quality": "{params.quality}",
+        "scale": "{params.scale}",
+        "no_audio": "{params.no_audio}"
+      }
+    }
+  ]
+}

@@ -1,0 +1,60 @@
+{
+  "schema_version": "1.0",
+  "name": "recipe-film-matte",
+  "title": "Film Matte Grade",
+  "description": "Soften highlights and lift matte shadows non-destructively via LightCraft.",
+  "version": "0.1.0",
+  "author": "wspotter",
+  "license": "MIT",
+  "app": "lightcraft",
+  "media_type": "photo",
+  "default_output_suffix": ".jpg",
+  "parameters": {
+    "exposure": {"type": "number", "default": 0.15},
+    "contrast": {"type": "number", "default": 12.0},
+    "blacks": {"type": "number", "default": 12.0},
+    "shadows": {"type": "number", "default": 15.0},
+    "highlights": {"type": "number", "default": -12.0},
+    "clarity": {"type": "number", "default": 8.0},
+    "saturation": {"type": "number", "default": -8.0},
+    "long_edge": {"type": "integer", "default": null},
+    "quality": {"type": "integer", "default": 92}
+  },
+  "steps": [
+    {
+      "id": "inspect",
+      "tool": "artcraft_inspect",
+      "args": {
+        "path": "{input}"
+      }
+    },
+    {
+      "id": "develop",
+      "tool": "artcraft_develop",
+      "args": {
+        "input_path": "{input}",
+        "output_path": "{output}",
+        "sliders": {
+          "light.exposure": "{params.exposure}",
+          "light.contrast": "{params.contrast}",
+          "light.blacks": "{params.blacks}",
+          "light.shadows": "{params.shadows}",
+          "light.highlights": "{params.highlights}",
+          "effects.clarity": "{params.clarity}",
+          "color.saturation": "{params.saturation}"
+        },
+        "long_edge": "{params.long_edge}",
+        "quality": "{params.quality}"
+      }
+    },
+    {
+      "id": "review",
+      "tool": "artcraft_build_review",
+      "args": {
+        "source_path": "{input}",
+        "output_path": "{output}",
+        "working_dir": "{work_dir}/review"
+      }
+    }
+  ]
+}

@@ -798,3 +798,83 @@ ARTCRAFT_VIDEO_BASIC = {
     },
 }
 
+ARTCRAFT_RECIPE = {
+    "name": "artcraft_recipe",
+    "description": (
+        "List, initialize, validate, export, import, or non-destructively run portable "
+        "ArtCraft recipe-* workflows (skills with executable recipe.json manifests) across "
+        "PhotoCraft, LightCraft, SoundCraft, and FilmCraft."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "action": {
+                "type": "string",
+                "enum": ["list", "init", "validate", "export", "import", "run"],
+                "description": "Recipe operation to execute.",
+            },
+            "recipe": {
+                "type": "string",
+                "description": "Recipe name, slug, or directory path (validate/export/run).",
+            },
+            "slug": {
+                "type": "string",
+                "description": "Slug for 'init' (for example 'amber-film' -> 'recipe-amber-film').",
+            },
+            "app": {
+                "type": "string",
+                "enum": ["photocraft", "lightcraft", "soundcraft", "filmcraft"],
+                "default": "lightcraft",
+                "description": "Target ArtCraft app for 'init' (default 'lightcraft').",
+            },
+            "author": {
+                "type": "string",
+                "default": "wspotter",
+                "description": "Author name written into scaffolded recipe metadata.",
+            },
+            "description": {
+                "type": "string",
+                "description": "Short description (<=60 chars ending with '.') for 'init'.",
+            },
+            "archive_path": {
+                "type": "string",
+                "description": "Destination or source zip path for 'export' or 'import'.",
+            },
+            "input_path": {
+                "type": "string",
+                "description": "Source media file path for 'run' (kept unchanged).",
+            },
+            "output_path": {
+                "type": "string",
+                "description": "Destination file path for 'run' (must differ from input_path).",
+            },
+            "params": {
+                "type": "object",
+                "description": "Parameter overrides declared in the recipe's recipe.json.",
+            },
+            "work_dir": {
+                "type": "string",
+                "description": (
+                    "Optional working directory for intermediate inspection/review files."
+                ),
+            },
+            "skills_dir": {
+                "type": "string",
+                "description": "Optional user skills/recipes directory override.",
+            },
+            "dry_run": {
+                "type": "boolean",
+                "default": False,
+                "description": "Plan and validate steps without executing tools or writing output.",
+            },
+            "allow_overwrite": {
+                "type": "boolean",
+                "default": False,
+                "description": "Allow replacing an existing recipe, archive, or output file.",
+            },
+        },
+        "required": ["action"],
+    },
+}
+
+

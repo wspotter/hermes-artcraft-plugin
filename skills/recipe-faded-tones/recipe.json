@@ -1,0 +1,56 @@
+{
+  "schema_version": "1.0",
+  "name": "recipe-faded-tones",
+  "title": "Faded Tones Recovery",
+  "description": "Gently recover tonal contrast and black/white endpoints without clipping.",
+  "version": "0.1.0",
+  "author": "wspotter",
+  "license": "MIT",
+  "app": "photocraft",
+  "media_type": "photo",
+  "default_output_suffix": ".png",
+  "parameters": {
+    "in_black": {"type": "integer", "default": 12},
+    "in_white": {"type": "integer", "default": 242},
+    "gamma": {"type": "number", "default": 1.05},
+    "out_black": {"type": "integer", "default": 0},
+    "out_white": {"type": "integer", "default": 255}
+  },
+  "steps": [
+    {
+      "id": "inspect",
+      "tool": "artcraft_prepare_inspection",
+      "args": {
+        "path": "{input}",
+        "working_dir": "{work_dir}/inspect"
+      }
+    },
+    {
+      "id": "restore",
+      "tool": "artcraft_restore_step",
+      "args": {
+        "input_path": "{input}",
+        "output_path": "{output}",
+        "recipe": "faded_tones",
+        "parameters": {
+          "inBlack": "{params.in_black}",
+          "inWhite": "{params.in_white}",
+          "gamma": "{params.gamma}",
+          "outBlack": "{params.out_black}",
+          "outWhite": "{params.out_white}"
+        },
+        "checkpoint_dir": "{work_dir}/checkpoints",
+        "step_name": "01_faded_tones"
+      }
+    },
+    {
+      "id": "review",
+      "tool": "artcraft_build_review",
+      "args": {
+        "source_path": "{input}",
+        "output_path": "{output}",
+        "working_dir": "{work_dir}/review"
+      }
+    }
+  ]
+}

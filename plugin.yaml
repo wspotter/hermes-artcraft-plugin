@@ -23,3 +23,4 @@ provides_tools:
   - artcraft_develop
   - artcraft_audio_basic
   - artcraft_video_basic
+  - artcraft_recipe

@@ -18,6 +18,9 @@ metadata:
       - filmcraft-basics
       - print-preparation
       - photo-restoration
+      - recipe-film-matte
+      - recipe-voice-master
+      - recipe-web-clip
       - recipe-maker
 ---
 
@@ -28,7 +31,7 @@ Route photo, audio, video, restoration, and print tasks across PhotoCraft, Light
 ## When to Use
 
 - Starting any creative media inspection, edit, restoration, print prep, audio conversion, or video export task.
-- Picking the right tool among the 15 Hermes tools (13 exposed over stdio MCP).
+- Picking the right tool among the 16 Hermes tools (14 exposed over stdio MCP).
 
 ## Prerequisites
 
@@ -58,8 +61,9 @@ Or call `artcraft_status`.
 | Audio probe, resample, normalize | `soundcraft-basics` | `artcraft_audio_basic` / `hermes artcraft audio` |
 | Video probe, frame grab, trim/export | `filmcraft-basics` | `artcraft_video_basic` / `hermes artcraft video` |
 | Physical print sizing & margins | `print-preparation` | `artcraft_prepare_print` / `hermes artcraft prep-print` |
-| Multi-step photo restoration | `photo-restoration` + `recipe-*` | `artcraft_restore_step`, `artcraft_checkpoint` |
-| Save a reusable custom workflow | `recipe-maker` | `artcraft_job` / `hermes artcraft job` |
+| Multi-step photo restoration | `photo-restoration` + `recipe-*` | `artcraft_restore_step`, `artcraft_recipe` |
+| Portable LightCraft / SoundCraft / FilmCraft looks | `recipe-film-matte`, `recipe-voice-master`, `recipe-web-clip` | `artcraft_recipe` / `hermes artcraft recipe run` |
+| Create, validate, export, or import a recipe | `recipe-maker` | `artcraft_recipe` / `hermes artcraft recipe` |
 
 4. Before handing off final image edits, run `artcraft_build_review` (`hermes artcraft review`) to generate before/after crops and check for no-ops, unexpected aspect shifts, or blurred patches. Use `artcraft_job` (`hermes artcraft job`) to keep multi-stage work organized in `source/`, `work/`, `previews/`, and `exports/` and to track deliveries.
 

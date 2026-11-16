@@ -62,7 +62,7 @@ Example MCP client entry:
 The `artcraft` plugin runs in the Hermes gateway environment and expects ArtCraft CLIs and target files to be accessible there.
 
 - **Sandboxed bots and Bot Screens:** If a bot's shell or Hermes Bot Screen runs inside a separate container or VM sandbox, any file created only inside the sandbox must be staged or mounted onto a shared path before the plugin can read it and return the edit.
-- **No ArtCraft installed in the VM:** Even without `*-cli` binaries present, the Pillow-backed tools still run (`artcraft_status`, `artcraft_inspect`, `artcraft_prepare_inspection`, `artcraft_prepare_print`, `artcraft_verify_edit`, `artcraft_checkpoint`, `artcraft_build_review`, `artcraft_job`). `artcraft_restore_step` requires `photocraft-cli` alongside `photocraft_spot_heal`. On a Linux VM or container, you can also extract just the headless CLI binaries from an ArtCraft AppImage (`--appimage-extract "usr/bin/*-cli"`) without installing a desktop environment.
+- **No ArtCraft installed in the VM:** Even without `*-cli` binaries present, the Pillow-backed tools still run (`artcraft_status`, `artcraft_inspect`, `artcraft_prepare_inspection`, `artcraft_prepare_print`, `artcraft_verify_edit`, `artcraft_checkpoint`, `artcraft_build_review`, `artcraft_job`, `artcraft_recipe` for inspect/validate/export/import and dry-run planning). `artcraft_restore_step` requires `photocraft-cli` alongside `photocraft_spot_heal`. On a Linux VM or container, you can also extract just the headless CLI binaries from an ArtCraft AppImage (`--appimage-extract "usr/bin/*-cli"`) without installing a desktop environment.
 - **Using ArtCraft on another machine over SSH:** A stdio MCP server runs as a separate subprocess. When you wrap its launch command with `ssh`, `artcraft_plugin.mcp_server` runs on that remote ArtCraft machine instead of inside the bot's host, with source and output files staged or mounted on a path that machine can reach:
 
 ```json
@@ -126,7 +126,7 @@ If the photo and sheet aspect ratios differ and cropping was not explicitly conf
 
 ## Tools
 
-The plugin registers **15 Hermes tools** (`toolset: artcraft`) and exposes **13 high-level tools** over the stdio MCP server:
+The plugin registers **16 Hermes tools** (`toolset: artcraft`) and exposes **14 high-level tools** over the stdio MCP server:
 
 | Tool | Hermes | MCP | App / Scope | Purpose |
 |---|---|---|---|---|
@@ -137,6 +137,7 @@ The plugin registers **15 Hermes tools** (`toolset: artcraft`) and exposes **13 
 | `artcraft_develop` | Yes | Yes | LightCraft | Apply sliders, presets, and sizing into a verified new export |
 | `artcraft_audio_basic` | Yes | Yes | SoundCraft | Probe audio streams (`info`) or convert, resample, normalize, and dither |
 | `artcraft_video_basic` | Yes | Yes | FilmCraft | Probe media (`probe`), extract PNG frames (`render_frame`), or export clips |
+| `artcraft_recipe` | Yes | Yes | All 4 / PIL | List, scaffold, validate, export/import zip bundles, and replay `recipe-*` workflows |
 | `artcraft_prepare_print` | Yes | Yes | PhotoCraft / PIL | Size print files at target PPI, keeping ICC profiles and asking before cropping |
 | `artcraft_restore_step` | Yes | Yes | PhotoCraft | Run one checkpointed restoration recipe with dual-scale crops and safety stops |
 | `artcraft_checkpoint` | Yes | Yes | PhotoCraft | List or fetch restoration checkpoints and comparison crops |
@@ -158,6 +159,8 @@ hermes artcraft audio info <input_path>
 hermes artcraft audio convert <input_path> <output_path> [--rate HZ] [--bit-depth 16|24|32f] [--normalize] [--dither|--no-dither]
 hermes artcraft video probe --input <input_path>
 hermes artcraft video render_frame --input <input_path> -o <output_path> [--seconds SEC] [--scale SCALE]
+hermes artcraft recipe list
+hermes artcraft recipe run <recipe> <input_path> <output_path> [--param KEY=VALUE ...]
 hermes artcraft video export --input <input_path> -o <output_path> [--start SEC] [--end SEC] [--format FMT] [--preset ID] [--scale SCALE]
 hermes artcraft prep-print <input_path> <output_path> --width W --height H [--ppi PPI] [--fit-mode MODE] [--confirm-crop]
 hermes artcraft restore <recipe> <input_path> <output_path> [--params JSON] [--region X Y W H] [--checkpoint-dir DIR]
@@ -183,6 +186,12 @@ python3 -m artcraft_plugin.cli restore faded_tones input.png output.png --params
 python3 -m artcraft_plugin.cli checkpoint list ./checkpoints
 python3 -m artcraft_plugin.cli job init my_job --workspace ./jobs --source input.png
 python3 -m artcraft_plugin.cli verify input.png output.png --region 100 100 64 64
+python3 -m artcraft_plugin.cli recipe list
+python3 -m artcraft_plugin.cli recipe init amber-film --app lightcraft
+python3 -m artcraft_plugin.cli recipe validate recipe-amber-film
+python3 -m artcraft_plugin.cli recipe export recipe-amber-film recipe-amber-film.zip
+python3 -m artcraft_plugin.cli recipe import recipe-amber-film.zip
+python3 -m artcraft_plugin.cli recipe run recipe-film-matte input.png output.jpg
 ```
 
 ## Bundled Skills (`skills/`)
@@ -205,6 +214,9 @@ python3 -m artcraft_plugin.cli verify input.png output.png --region 100 100 64 6
 | `recipe-noise-grain` | Reduce sensor and scan noise while retaining fine detail. |
 | `recipe-sharpening` | Apply restrained unsharp masking without edge halos. |
 | `recipe-enlargement` | Upscale images proportionally with restrained sharpening. |
+| `recipe-film-matte` | Apply warm matte film contrast via LightCraft CLI (`recipe.json`). |
+| `recipe-voice-master` | Clean and resample spoken-word audio to 48kHz WAV (`recipe.json`). |
+| `recipe-web-clip` | Probe, preview-frame, and export web-ready video clips (`recipe.json`). |
 
 ## Development
 

@@ -53,9 +53,10 @@ python3 -m unittest tests/test_skill_standards.py -v
 1. Probe and inspect the sample input first. Call `artcraft_status` (plus `photocraft_run` or `lightcraft_run` with `["--help"]` when checking CLI flags), then inspect the input with `artcraft_prepare_inspection` (images), `artcraft_audio_basic` `action="info"` (audio), or `artcraft_video_basic` `action="probe"` (video). Record the baseline numbers that trigger the recipe.
 2. Prototype non-destructively in a job workspace (`artcraft_job` `action="init"`). Run candidate steps (`artcraft_develop`, `artcraft_restore_step`, `photocraft_spot_heal`, `artcraft_prepare_print`, `artcraft_audio_basic`, `artcraft_video_basic`) writing each stage to a new file under `<work_dir>/work/` while keeping `source_sha256` intact. Pick conservative defaults and clear safety bounds.
 3. Verify before/after quality with `artcraft_build_review` or `artcraft_verify_edit` (or audio/video stream checks), and write down when the recipe must stop and ask for confirmation (`status: "needs_decision"` or `status: "needs_clarification"`).
-4. Save the recipe skill to the right place:
-   - For your own personal recipes (bundled plugin skills are read-only at runtime), save to `~/.hermes/skills/recipe-<slug>/SKILL.md` (or `<workspace_dir>/skills/recipe-<slug>/SKILL.md`, or via `skill_manage`).
-   - Only write to `skills/recipe-<slug>/SKILL.md` inside this plugin repository when contributing a new bundled skill upstream.
+4. Scaffold, validate, and trade the recipe skill cleanly:
+   - Run `hermes artcraft recipe init <slug> --app <app>` to scaffold `~/.hermes/skills/recipe-<slug>/` with both `SKILL.md` and an executable `recipe.json` manifest (never write custom user recipes inside the bundled plugin repo unless contributing upstream).
+   - Validate before running or sharing with `hermes artcraft recipe validate recipe-<slug>`, pack with `hermes artcraft recipe export recipe-<slug> recipe-<slug>.zip`, and install shared archives with `hermes artcraft recipe import <archive>.zip`.
+   - Replay any validated manifest deterministically via `hermes artcraft recipe run recipe-<slug> <in> <out>` or `artcraft_recipe`.
 
 Use this frontmatter and six-section layout:
 

@@ -1,0 +1,41 @@
+{
+  "schema_version": "1.0",
+  "name": "recipe-voice-master",
+  "title": "Voice Master 48kHz WAV",
+  "description": "Probe and normalize spoken-word audio to 48kHz 24-bit WAV via SoundCraft.",
+  "version": "0.1.0",
+  "author": "wspotter",
+  "license": "MIT",
+  "app": "soundcraft",
+  "media_type": "audio",
+  "default_output_suffix": ".wav",
+  "parameters": {
+    "sample_rate": {"type": "integer", "default": 48000},
+    "bit_depth": {"type": "string", "default": "24"},
+    "normalize": {"type": "boolean", "default": true},
+    "dither": {"type": "boolean", "default": true}
+  },
+  "steps": [
+    {
+      "id": "probe",
+      "tool": "artcraft_audio_basic",
+      "args": {
+        "action": "info",
+        "input_path": "{input}"
+      }
+    },
+    {
+      "id": "convert",
+      "tool": "artcraft_audio_basic",
+      "args": {
+        "action": "convert",
+        "input_path": "{input}",
+        "output_path": "{output}",
+        "sample_rate": "{params.sample_rate}",
+        "bit_depth": "{params.bit_depth}",
+        "normalize": "{params.normalize}",
+        "dither": "{params.dither}"
+      }
+    }
+  ]
+}

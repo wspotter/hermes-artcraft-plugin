@@ -1,0 +1,52 @@
+{
+  "schema_version": "1.0",
+  "name": "recipe-sharpening",
+  "title": "Restrained Unsharp Mask",
+  "description": "Apply halo-free output sharpening with conservative amount and threshold.",
+  "version": "0.1.0",
+  "author": "wspotter",
+  "license": "MIT",
+  "app": "photocraft",
+  "media_type": "photo",
+  "default_output_suffix": ".png",
+  "parameters": {
+    "amount": {"type": "number", "default": 50.0},
+    "radius": {"type": "number", "default": 1.0},
+    "threshold": {"type": "integer", "default": 2}
+  },
+  "steps": [
+    {
+      "id": "inspect",
+      "tool": "artcraft_prepare_inspection",
+      "args": {
+        "path": "{input}",
+        "working_dir": "{work_dir}/inspect"
+      }
+    },
+    {
+      "id": "restore",
+      "tool": "artcraft_restore_step",
+      "args": {
+        "input_path": "{input}",
+        "output_path": "{output}",
+        "recipe": "sharpening",
+        "parameters": {
+          "amount": "{params.amount}",
+          "radius": "{params.radius}",
+          "threshold": "{params.threshold}"
+        },
+        "checkpoint_dir": "{work_dir}/checkpoints",
+        "step_name": "05_sharpening"
+      }
+    },
+    {
+      "id": "review",
+      "tool": "artcraft_build_review",
+      "args": {
+        "source_path": "{input}",
+        "output_path": "{output}",
+        "working_dir": "{work_dir}/review"
+      }
+    }
+  ]
+}

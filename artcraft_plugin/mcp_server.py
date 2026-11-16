@@ -68,6 +68,10 @@ EXPOSED_TOOLS: Dict[str, Dict[str, Any]] = {
         "schema": schemas.ARTCRAFT_VIDEO_BASIC,
         "handler": tools.artcraft_video_basic,
     },
+    "artcraft_recipe": {
+        "schema": schemas.ARTCRAFT_RECIPE,
+        "handler": tools.artcraft_recipe,
+    },
 }
 
 

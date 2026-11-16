@@ -1,0 +1,50 @@
+{
+  "schema_version": "1.0",
+  "name": "recipe-dust-scratches",
+  "title": "Dust and Scratches Cleanup",
+  "description": "Suppress fine scan dust and light scratches while preserving texture.",
+  "version": "0.1.0",
+  "author": "wspotter",
+  "license": "MIT",
+  "app": "photocraft",
+  "media_type": "photo",
+  "default_output_suffix": ".png",
+  "parameters": {
+    "radius": {"type": "integer", "default": 1},
+    "threshold": {"type": "integer", "default": 15}
+  },
+  "steps": [
+    {
+      "id": "inspect",
+      "tool": "artcraft_prepare_inspection",
+      "args": {
+        "path": "{input}",
+        "working_dir": "{work_dir}/inspect"
+      }
+    },
+    {
+      "id": "restore",
+      "tool": "artcraft_restore_step",
+      "args": {
+        "input_path": "{input}",
+        "output_path": "{output}",
+        "recipe": "dust_and_scratches",
+        "parameters": {
+          "radius": "{params.radius}",
+          "threshold": "{params.threshold}"
+        },
+        "checkpoint_dir": "{work_dir}/checkpoints",
+        "step_name": "03_dust_scratches"
+      }
+    },
+    {
+      "id": "review",
+      "tool": "artcraft_build_review",
+      "args": {
+        "source_path": "{input}",
+        "output_path": "{output}",
+        "working_dir": "{work_dir}/review"
+      }
+    }
+  ]
+}

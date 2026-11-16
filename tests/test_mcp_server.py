@@ -36,9 +36,10 @@ class TestArtCraftMcpServer(unittest.TestCase):
             "artcraft_develop",
             "artcraft_audio_basic",
             "artcraft_video_basic",
+            "artcraft_recipe",
         }
         self.assertEqual(set(mcp_server.EXPOSED_TOOLS.keys()), expected_tools)
-        self.assertEqual(len(mcp_server.EXPOSED_TOOLS), 13)
+        self.assertEqual(len(mcp_server.EXPOSED_TOOLS), 14)
 
     def test_initialize_and_ping(self) -> None:
         init_req = {
@@ -69,7 +70,7 @@ class TestArtCraftMcpServer(unittest.TestCase):
         resp = mcp_server.process_message(req)
         self.assertIsNotNone(resp)
         tools = resp["result"]["tools"]
-        self.assertEqual(len(tools), 13)
+        self.assertEqual(len(tools), 14)
         tool_names = {t["name"] for t in tools}
         self.assertIn("artcraft_build_review", tool_names)
         self.assertIn("artcraft_job", tool_names)
@@ -77,6 +78,7 @@ class TestArtCraftMcpServer(unittest.TestCase):
         self.assertIn("artcraft_develop", tool_names)
         self.assertIn("artcraft_audio_basic", tool_names)
         self.assertIn("artcraft_video_basic", tool_names)
+        self.assertIn("artcraft_recipe", tool_names)
         for t in tools:
             self.assertIn("description", t)
             self.assertIn("inputSchema", t)
@@ -158,7 +160,7 @@ class TestArtCraftMcpServer(unittest.TestCase):
         self.assertEqual(resp1["id"], 1)
         self.assertEqual(resp1["result"], {})
         self.assertEqual(resp2["id"], 2)
-        self.assertEqual(len(resp2["result"]["tools"]), 13)
+        self.assertEqual(len(resp2["result"]["tools"]), 14)
 
     def test_content_length_framing(self) -> None:
         payload = json.dumps({"jsonrpc": "2.0", "id": "cl-1", "method": "ping"}).encode("utf-8")

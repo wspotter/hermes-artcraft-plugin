@@ -62,14 +62,18 @@ class TestToolsAndPluginRegistration(unittest.TestCase):
                 "artcraft_develop",
                 "artcraft_audio_basic",
                 "artcraft_video_basic",
+                "artcraft_recipe",
             },
         )
-        self.assertEqual(len(ctx.tools), 15)
+        self.assertEqual(len(ctx.tools), 16)
         for tool in ctx.tools.values():
             self.assertEqual(tool["toolset"], "artcraft")
         self.assertIn("artcraft", ctx.cli_commands)
-        self.assertEqual(len(ctx.skills), 16)
+        self.assertEqual(len(ctx.skills), 19)
         self.assertIn("recipe-maker", ctx.skills)
+        self.assertIn("recipe-film-matte", ctx.skills)
+        self.assertIn("recipe-voice-master", ctx.skills)
+        self.assertIn("recipe-web-clip", ctx.skills)
         self.assertIn("artcraft-router", ctx.skills)
         for skill_path in ctx.skills.values():
             self.assertTrue(skill_path.is_file())

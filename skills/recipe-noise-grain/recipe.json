@@ -1,0 +1,56 @@
+{
+  "schema_version": "1.0",
+  "name": "recipe-noise-grain",
+  "title": "Noise and Grain Reduction",
+  "description": "Calm chroma speckling and scanner noise while keeping fine details sharp.",
+  "version": "0.1.0",
+  "author": "wspotter",
+  "license": "MIT",
+  "app": "photocraft",
+  "media_type": "photo",
+  "default_output_suffix": ".png",
+  "parameters": {
+    "strength": {"type": "integer", "default": 4},
+    "preserve_details": {"type": "integer", "default": 70},
+    "reduce_color_noise": {"type": "integer", "default": 45},
+    "sharpen_details": {"type": "integer", "default": 15},
+    "remove_jpeg_artifact": {"type": "boolean", "default": false}
+  },
+  "steps": [
+    {
+      "id": "inspect",
+      "tool": "artcraft_prepare_inspection",
+      "args": {
+        "path": "{input}",
+        "working_dir": "{work_dir}/inspect"
+      }
+    },
+    {
+      "id": "restore",
+      "tool": "artcraft_restore_step",
+      "args": {
+        "input_path": "{input}",
+        "output_path": "{output}",
+        "recipe": "noise_and_grain",
+        "parameters": {
+          "strength": "{params.strength}",
+          "preserveDetails": "{params.preserve_details}",
+          "reduceColorNoise": "{params.reduce_color_noise}",
+          "sharpenDetails": "{params.sharpen_details}",
+          "removeJpegArtifact": "{params.remove_jpeg_artifact}"
+        },
+        "checkpoint_dir": "{work_dir}/checkpoints",
+        "step_name": "04_noise_grain"
+      }
+    },
+    {
+      "id": "review",
+      "tool": "artcraft_build_review",
+      "args": {
+        "source_path": "{input}",
+        "output_path": "{output}",
+        "working_dir": "{work_dir}/review"
+      }
+    }
+  ]
+}

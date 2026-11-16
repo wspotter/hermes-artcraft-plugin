@@ -18,6 +18,14 @@ from .jobs import (
     save_checkpoint,
 )
 from .print_prep import prepare_print
+from .recipes import (
+    export_recipe,
+    import_recipe,
+    init_recipe,
+    list_recipes,
+    run_recipe,
+    validate_recipe,
+)
 from .restore import get_checkpoint, list_checkpoints, restore_step
 from .review import build_review_package
 from .runner import run_artcraft_cli, spot_heal
@@ -520,4 +528,96 @@ def artcraft_video_basic(args: Dict[str, Any], **kwargs: Any) -> str:
         return json.dumps(res)
     except Exception as exc:
         return json.dumps({"ok": False, "app": "filmcraft", "error": str(exc)})
+
+
+def artcraft_recipe(args: Dict[str, Any], **kwargs: Any) -> str:
+    """List, scaffold, validate, export, import, or run portable `recipe-*` workflows."""
+    try:
+        action = args.get("action")
+        if not isinstance(action, str) or not action.strip():
+            return json.dumps({"ok": False, "error": "Missing required 'action' string"})
+
+        skills_dir = args.get("skills_dir")
+        allow_overwrite = bool(args.get("allow_overwrite", False))
+
+        if action == "list":
+            return json.dumps(list_recipes(skills_dir=skills_dir))
+
+        if action == "init":
+            slug = args.get("slug") or args.get("recipe")
+            if not isinstance(slug, str) or not slug.strip():
+                return json.dumps({"ok": False, "error": "Init action requires 'slug'"})
+            res = init_recipe(
+                slug=slug,
+                app=str(args.get("app", "lightcraft")),
+                dest_dir=skills_dir,
+                author=str(args.get("author", "wspotter")),
+                description=args.get("description"),
+                allow_overwrite=allow_overwrite,
+            )
+            return json.dumps(res)
+
+        if action == "validate":
+            target = args.get("recipe")
+            if not isinstance(target, str) or not target.strip():
+                return json.dumps({"ok": False, "error": "Validate action requires 'recipe'"})
+            res = validate_recipe(
+                target,
+                skills_dir=skills_dir,
+                require_manifest=not bool(args.get("allow_doc_only", False)),
+            )
+            return json.dumps(res)
+
+        if action == "export":
+            target = args.get("recipe")
+            archive_path = args.get("archive_path")
+            if not target or not archive_path:
+                return json.dumps({
+                    "ok": False,
+                    "error": "Export action requires 'recipe' and 'archive_path'",
+                })
+            res = export_recipe(
+                str(target),
+                str(archive_path),
+                skills_dir=skills_dir,
+                allow_overwrite=allow_overwrite,
+            )
+            return json.dumps(res)
+
+        if action == "import":
+            archive_path = args.get("archive_path")
+            if not isinstance(archive_path, str) or not archive_path.strip():
+                return json.dumps({"ok": False, "error": "Import action requires 'archive_path'"})
+            res = import_recipe(
+                archive_path,
+                dest_dir=skills_dir,
+                allow_overwrite=allow_overwrite,
+            )
+            return json.dumps(res)
+
+        if action == "run":
+            target = args.get("recipe")
+            input_path = args.get("input_path")
+            output_path = args.get("output_path")
+            if not target or not input_path or not output_path:
+                return json.dumps({
+                    "ok": False,
+                    "error": "Run action requires 'recipe', 'input_path', and 'output_path'",
+                })
+            res = run_recipe(
+                str(target),
+                str(input_path),
+                str(output_path),
+                params=args.get("params"),
+                work_dir=args.get("work_dir"),
+                skills_dir=skills_dir,
+                allow_overwrite=allow_overwrite,
+                dry_run=bool(args.get("dry_run", False)),
+            )
+            return json.dumps(res)
+
+        return json.dumps({"ok": False, "error": f"Unknown recipe action {action!r}"})
+    except Exception as exc:
+        return json.dumps({"ok": False, "error": str(exc)})
+
 

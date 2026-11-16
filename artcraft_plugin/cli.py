@@ -352,6 +352,104 @@ def _cmd_video(args: argparse.Namespace) -> int:
         return 1
 
 
+def _parse_recipe_param_value(raw_val: str) -> Any:
+    """Parse CLI `--param key=value` scalar/JSON values safely."""
+    low = raw_val.strip().lower()
+    if low == "true":
+        return True
+    if low == "false":
+        return False
+    if low == "null":
+        return None
+    try:
+        return json.loads(raw_val)
+    except Exception:
+        return raw_val
+
+
+def _parse_recipe_params(args: argparse.Namespace) -> dict[str, Any] | None:
+    """Combine `--params-json` and repeated `--param key=value` CLI arguments."""
+    merged: dict[str, Any] = {}
+    if getattr(args, "params_json", None):
+        parsed = json.loads(args.params_json)
+        if not isinstance(parsed, dict):
+            raise ValueError("--params-json must decode to a JSON object")
+        merged.update(parsed)
+    for item in getattr(args, "param", None) or []:
+        if "=" not in item:
+            raise ValueError(f"--param must use key=value format, got {item!r}")
+        k, _, v = item.partition("=")
+        key = k.strip()
+        if not key:
+            raise ValueError(f"Empty parameter key in {item!r}")
+        merged[key] = _parse_recipe_param_value(v)
+    return merged or None
+
+
+def _cmd_recipe(args: argparse.Namespace) -> int:
+    from .recipes import (
+        export_recipe,
+        import_recipe,
+        init_recipe,
+        list_recipes,
+        run_recipe,
+        validate_recipe,
+    )
+
+    try:
+        action = args.recipe_action
+        if action == "list":
+            res = list_recipes(skills_dir=args.skills_dir)
+        elif action == "init":
+            res = init_recipe(
+                args.slug,
+                app=args.app,
+                dest_dir=args.dest_dir,
+                author=args.author,
+                description=args.description,
+                allow_overwrite=args.allow_overwrite,
+            )
+        elif action == "validate":
+            res = validate_recipe(
+                args.recipe,
+                skills_dir=args.skills_dir,
+                require_manifest=not args.allow_doc_only,
+            )
+        elif action == "export":
+            res = export_recipe(
+                args.recipe,
+                args.archive_path,
+                skills_dir=args.skills_dir,
+                allow_overwrite=args.allow_overwrite,
+            )
+        elif action == "import":
+            res = import_recipe(
+                args.archive_path,
+                dest_dir=args.dest_dir,
+                allow_overwrite=args.allow_overwrite,
+            )
+        elif action == "run":
+            res = run_recipe(
+                args.recipe,
+                args.input_path,
+                args.output_path,
+                params=_parse_recipe_params(args),
+                work_dir=args.work_dir,
+                skills_dir=args.skills_dir,
+                allow_overwrite=args.allow_overwrite,
+                dry_run=args.dry_run,
+            )
+        else:
+            res = {"ok": False, "error": f"Unknown recipe subcommand: {action!r}"}
+
+        print(json.dumps(res, indent=2))
+        return 0 if res.get("ok") else 1
+    except Exception as exc:
+        print(json.dumps({"ok": False, "error": str(exc)}, indent=2))
+        return 1
+
+
+
 
 
 def register_cli(subparser: argparse.ArgumentParser) -> None:
@@ -749,6 +847,68 @@ def register_cli(subparser: argparse.ArgumentParser) -> None:
         help="Allow overwriting existing output",
     )
     vid_cmd.set_defaults(func=_cmd_video)
+
+    # Portable recipe workflows (list/init/validate/export/import/run)
+    rec_cmd = sub.add_parser(
+        "recipe", help="List, create, validate, trade, and replay portable recipes"
+    )
+    rec_sub = rec_cmd.add_subparsers(dest="recipe_action", required=True)
+
+    r_list = rec_sub.add_parser("list", help="List installed and bundled recipes")
+    r_list.add_argument("--skills-dir", default=None, help="User skills/recipes directory")
+    r_list.set_defaults(func=_cmd_recipe)
+
+    r_init = rec_sub.add_parser("init", help="Scaffold a new portable recipe directory")
+    r_init.add_argument("slug", help="Recipe slug (e.g. 'amber-film' -> 'recipe-amber-film')")
+    r_init.add_argument(
+        "--app",
+        choices=["photocraft", "lightcraft", "soundcraft", "filmcraft"],
+        default="lightcraft",
+        help="Target ArtCraft app (default: lightcraft)",
+    )
+    r_init.add_argument("--dest-dir", default=None, help="Destination skills directory")
+    r_init.add_argument("--author", default="wspotter", help="Author identifier")
+    r_init.add_argument("--description", default=None, help="<=60 char description ending with '.'")
+    r_init.add_argument("--allow-overwrite", action="store_true", default=False)
+    r_init.set_defaults(func=_cmd_recipe)
+
+    r_val = rec_sub.add_parser("validate", help="Validate a recipe SKILL.md and recipe.json")
+    r_val.add_argument("recipe", help="Recipe name/slug or directory path")
+    r_val.add_argument("--skills-dir", default=None, help="User skills/recipes directory")
+    r_val.add_argument("--allow-doc-only", action="store_true", default=False)
+    r_val.set_defaults(func=_cmd_recipe)
+
+    r_exp = rec_sub.add_parser("export", help="Pack a validated recipe into a portable zip")
+    r_exp.add_argument("recipe", help="Recipe name/slug or directory path")
+    r_exp.add_argument("archive_path", help="Destination .zip archive path")
+    r_exp.add_argument("--skills-dir", default=None, help="User skills/recipes directory")
+    r_exp.add_argument("--allow-overwrite", action="store_true", default=False)
+    r_exp.set_defaults(func=_cmd_recipe)
+
+    r_imp = rec_sub.add_parser("import", help="Verify and install a traded recipe zip bundle")
+    r_imp.add_argument("archive_path", help="Path to traded .zip archive")
+    r_imp.add_argument("--dest-dir", default=None, help="Destination skills directory")
+    r_imp.add_argument("--allow-overwrite", action="store_true", default=False)
+    r_imp.set_defaults(func=_cmd_recipe)
+
+    r_run = rec_sub.add_parser("run", help="Replay a validated multi-step recipe non-destructively")
+    r_run.add_argument("recipe", help="Recipe name/slug or directory path")
+    r_run.add_argument("input_path", help="Original source media path (never modified)")
+    r_run.add_argument("output_path", help="New destination output path")
+    r_run.add_argument(
+        "--param",
+        action="append",
+        default=[],
+        help="Override recipe parameter (key=value, repeatable)",
+    )
+    r_run.add_argument("--params-json", default=None, help="JSON object of parameter overrides")
+    r_run.add_argument(
+        "--work-dir", default=None, help="Working directory for intermediate artifacts"
+    )
+    r_run.add_argument("--skills-dir", default=None, help="User skills/recipes directory")
+    r_run.add_argument("--dry-run", action="store_true", default=False)
+    r_run.add_argument("--allow-overwrite", action="store_true", default=False)
+    r_run.set_defaults(func=_cmd_recipe)
 
 
 def main(argv: Any = None) -> int:
