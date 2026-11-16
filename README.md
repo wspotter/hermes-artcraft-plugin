@@ -8,6 +8,7 @@ Run PhotoCraft, LightCraft, FilmCraft, and SoundCraft from [Hermes Agent](https:
 hermes artcraft doctor
 hermes artcraft develop photo.png photo_graded.jpg --set light.exposure=0.35 --size 2048
 hermes artcraft prep-print photo_graded.jpg print_8x10.png --width 8 --height 10 --fit-mode margins
+hermes artcraft recipe run recipe-film-matte photo.png photo_matte.jpg
 ```
 
 ## Installation
@@ -117,6 +118,24 @@ hermes artcraft prep-print portrait.png print_8x10.png --width 8 --height 10 --f
 
 If the photo and sheet aspect ratios differ and cropping was not explicitly confirmed (`--confirm-crop` or `--fit-mode margins`), `artcraft_prepare_print` stops before writing anything and asks whether to crop borderless or add margins.
 
+### Portable, tradeable multi-step recipes
+
+Turn multi-step edits across **PhotoCraft**, **LightCraft**, **SoundCraft**, and **FilmCraft** into portable `recipe-*` skills (`SKILL.md` + executable `recipe.json` manifest) that can be developed, validated, shared as checksummed `.zip` bundles, and replayed deterministically:
+
+> "Create a reusable LightCraft matte look recipe, validate it, run it on `photo.png` without altering the original, and pack a `.zip` bundle I can trade."
+
+```bash
+hermes artcraft recipe init amber-film --app lightcraft
+hermes artcraft recipe validate recipe-amber-film
+hermes artcraft recipe run recipe-film-matte photo.png photo_matte.jpg --param contrast=15 --param shadows=20
+hermes artcraft recipe export recipe-amber-film recipe-amber-film.zip
+hermes artcraft recipe import recipe-amber-film.zip
+```
+
+![Portable ArtCraft recipe workflow](docs/screenshots/recipe-workflow.png)
+
+`artcraft_recipe` ships with **9 runnable bundled recipes** (`recipe-faded-tones`, `recipe-color-cast`, `recipe-dust-scratches`, `recipe-noise-grain`, `recipe-sharpening`, `recipe-enlargement`, `recipe-film-matte`, `recipe-voice-master`, and `recipe-web-clip`). Replay stages outputs inside `{work_dir}`, restricts steps to allowlisted non-destructive tools, verifies pre/post `source_sha256`, pauses if a step hits `needs_decision` or `needs_clarification`, and blocks leaked local paths, private IPs, symlinks, or zip-slip entries when sharing.
+
 ## Safeguards
 
 - Source files are never edited in place. Write tools require a new `output_path`, compare source SHA-256 digests before and after execution, and decode or probe the output before succeeding.
@@ -159,8 +178,6 @@ hermes artcraft audio info <input_path>
 hermes artcraft audio convert <input_path> <output_path> [--rate HZ] [--bit-depth 16|24|32f] [--normalize] [--dither|--no-dither]
 hermes artcraft video probe --input <input_path>
 hermes artcraft video render_frame --input <input_path> -o <output_path> [--seconds SEC] [--scale SCALE]
-hermes artcraft recipe list
-hermes artcraft recipe run <recipe> <input_path> <output_path> [--param KEY=VALUE ...]
 hermes artcraft video export --input <input_path> -o <output_path> [--start SEC] [--end SEC] [--format FMT] [--preset ID] [--scale SCALE]
 hermes artcraft prep-print <input_path> <output_path> --width W --height H [--ppi PPI] [--fit-mode MODE] [--confirm-crop]
 hermes artcraft restore <recipe> <input_path> <output_path> [--params JSON] [--region X Y W H] [--checkpoint-dir DIR]
@@ -168,6 +185,12 @@ hermes artcraft checkpoint {list,get} <checkpoint_dir> [--step-id ID]
 hermes artcraft review <source_path> <output_path> [--working-dir DIR] [--region X Y W H] [--no-preserve-framing] [--crop-geometry JSON]
 hermes artcraft job {init,checkpoint,resume,export,deliver,reconcile,status} <job_id> ...
 hermes artcraft verify <input_path> <output_path> [--width W] [--height H] [--region X Y W H]
+hermes artcraft recipe list [--skills-dir DIR]
+hermes artcraft recipe init <slug> [--app {photocraft,lightcraft,soundcraft,filmcraft}] [--dest-dir DIR]
+hermes artcraft recipe validate <recipe> [--skills-dir DIR]
+hermes artcraft recipe export <recipe> <archive_path> [--skills-dir DIR]
+hermes artcraft recipe import <archive_path> [--dest-dir DIR]
+hermes artcraft recipe run <recipe> <input_path> <output_path> [--param KEY=VALUE ...] [--dry-run]
 ```
 
 Standalone without Hermes:
